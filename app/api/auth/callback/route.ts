@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     const expiresAt = Math.floor(Date.now() / 1000) + tokens.expires_in;
 
     // Save user to database
-    upsertUser({
+    await upsertUser({
       id: spotifyUser.id,
       display_name: spotifyUser.display_name,
       email: spotifyUser.email,

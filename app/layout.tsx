@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Vinyl Finder - Discover Albums on Vinyl",
+  title: "Vinyl Destination - Discover Albums on Vinyl",
   description:
     "Find vinyl releases for your favorite Spotify albums and build your collection",
 };

@@ -95,7 +95,7 @@ export async function getAuthenticatedUser(): Promise<{
     return null;
   }
 
-  const user = getUser(userId);
+  const user = await getUser(userId);
   if (!user || !user.access_token || !user.refresh_token) {
     return null;
   }
@@ -106,7 +106,7 @@ export async function getAuthenticatedUser(): Promise<{
     try {
       const newTokens = await refreshAccessToken(user.refresh_token);
       const expiresAt = now + newTokens.expires_in;
-      updateUserTokens(
+      await updateUserTokens(
         userId,
         newTokens.access_token,
         newTokens.refresh_token || user.refresh_token,

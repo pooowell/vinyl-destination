@@ -43,7 +43,7 @@ export async function GET() {
     );
 
     // Get albums user has already actioned
-    const actionedAlbumIds = new Set(getAllUserAlbumIds(userId));
+    const actionedAlbumIds = new Set(await getAllUserAlbumIds(userId));
 
     // Filter out actioned albums and only full albums
     const candidateAlbums = allAlbums

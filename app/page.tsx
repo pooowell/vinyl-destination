@@ -29,7 +29,7 @@ export default async function Home({
           </svg>
         </div>
 
-        <h1 className="text-5xl font-bold mb-4">Vinyl Finder</h1>
+        <h1 className="text-5xl font-bold mb-4">Vinyl Destination</h1>
         <p className="text-xl text-zinc-400 mb-8">
           Discover which of your favorite Spotify albums are available on vinyl.
           Build and track your vinyl collection.

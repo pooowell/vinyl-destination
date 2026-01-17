@@ -1,63 +1,4 @@
-import Database from "better-sqlite3";
-import path from "path";
-
-const dbPath = path.join(process.cwd(), "data", "vinyl.db");
-
-let db: Database.Database | null = null;
-
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(dbPath);
-    db.pragma("journal_mode = WAL");
-    initializeTables();
-  }
-  return db;
-}
-
-function initializeTables() {
-  const database = db!;
-
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      display_name TEXT,
-      email TEXT,
-      access_token TEXT,
-      refresh_token TEXT,
-      token_expires_at INTEGER,
-      created_at INTEGER DEFAULT (unixepoch())
-    );
-
-    CREATE TABLE IF NOT EXISTS user_albums (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      album_id TEXT NOT NULL,
-      album_name TEXT,
-      artist_name TEXT,
-      image_url TEXT,
-      status TEXT NOT NULL,
-      created_at INTEGER DEFAULT (unixepoch()),
-      FOREIGN KEY (user_id) REFERENCES users(id),
-      UNIQUE(user_id, album_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_user_albums_user_id ON user_albums(user_id);
-    CREATE INDEX IF NOT EXISTS idx_user_albums_status ON user_albums(user_id, status);
-
-    -- Cache for vinyl availability checks (expires after 7 days)
-    CREATE TABLE IF NOT EXISTS vinyl_cache (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      artist_name TEXT NOT NULL,
-      album_name TEXT NOT NULL,
-      has_vinyl INTEGER NOT NULL,
-      discogs_url TEXT,
-      checked_at INTEGER DEFAULT (unixepoch()),
-      UNIQUE(artist_name, album_name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_vinyl_cache_lookup ON vinyl_cache(artist_name, album_name);
-  `);
-}
+import { supabase } from "./supabase";
 
 // User operations
 export interface User {
@@ -70,54 +11,69 @@ export interface User {
   created_at: number;
 }
 
-export function upsertUser(user: {
+export async function upsertUser(user: {
   id: string;
   display_name?: string;
   email?: string;
   access_token: string;
   refresh_token: string;
   token_expires_at: number;
-}): void {
-  const database = getDb();
-  const stmt = database.prepare(`
-    INSERT INTO users (id, display_name, email, access_token, refresh_token, token_expires_at)
-    VALUES (@id, @display_name, @email, @access_token, @refresh_token, @token_expires_at)
-    ON CONFLICT(id) DO UPDATE SET
-      display_name = @display_name,
-      email = @email,
-      access_token = @access_token,
-      refresh_token = @refresh_token,
-      token_expires_at = @token_expires_at
-  `);
-  stmt.run({
-    id: user.id,
-    display_name: user.display_name || null,
-    email: user.email || null,
-    access_token: user.access_token,
-    refresh_token: user.refresh_token,
-    token_expires_at: user.token_expires_at,
-  });
+}): Promise<void> {
+  const { error } = await supabase
+    .from("users")
+    .upsert({
+      id: user.id,
+      display_name: user.display_name || null,
+      email: user.email || null,
+      access_token: user.access_token,
+      refresh_token: user.refresh_token,
+      token_expires_at: user.token_expires_at,
+    });
+
+  if (error) {
+    console.error("Error upserting user:", error);
+    throw error;
+  }
 }
 
-export function getUser(id: string): User | undefined {
-  const database = getDb();
-  const stmt = database.prepare("SELECT * FROM users WHERE id = ?");
-  return stmt.get(id) as User | undefined;
+export async function getUser(id: string): Promise<User | undefined> {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      // No rows returned
+      return undefined;
+    }
+    console.error("Error getting user:", error);
+    throw error;
+  }
+
+  return data as User;
 }
 
-export function updateUserTokens(
+export async function updateUserTokens(
   id: string,
   accessToken: string,
   refreshToken: string,
   expiresAt: number
-): void {
-  const database = getDb();
-  const stmt = database.prepare(`
-    UPDATE users
-    SET access_token = ?, refresh_token = ?, token_expires_at = ?
-    WHERE id = ?
-  `);
-  stmt.run(accessToken, refreshToken, expiresAt, id);
+): Promise<void> {
+  const { error } = await supabase
+    .from("users")
+    .update({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_expires_at: expiresAt,
+    })
+    .eq("id", id);
+
+  if (error) {
+    console.error("Error updating user tokens:", error);
+    throw error;
+  }
 }
 
 // Album operations
@@ -136,7 +92,7 @@ export interface UserAlbum {
   created_at: number;
 }
 
-export function setAlbumStatus(
+export async function setAlbumStatus(
   userId: string,
   album: {
     album_id: string;
@@ -145,77 +101,115 @@ export function setAlbumStatus(
     image_url: string;
   },
   status: AlbumStatus
-): void {
-  const database = getDb();
-  const stmt = database.prepare(`
-    INSERT INTO user_albums (user_id, album_id, album_name, artist_name, image_url, status)
-    VALUES (@user_id, @album_id, @album_name, @artist_name, @image_url, @status)
-    ON CONFLICT(user_id, album_id) DO UPDATE SET
-      status = @status,
-      album_name = @album_name,
-      artist_name = @artist_name,
-      image_url = @image_url
-  `);
-  stmt.run({
-    user_id: userId,
-    album_id: album.album_id,
-    album_name: album.album_name,
-    artist_name: album.artist_name,
-    image_url: album.image_url,
-    status,
-  });
+): Promise<void> {
+  const { error } = await supabase
+    .from("user_albums")
+    .upsert(
+      {
+        user_id: userId,
+        album_id: album.album_id,
+        album_name: album.album_name,
+        artist_name: album.artist_name,
+        image_url: album.image_url,
+        status,
+        created_at: Math.floor(Date.now() / 1000),
+      },
+      {
+        onConflict: "user_id,album_id",
+      }
+    );
+
+  if (error) {
+    console.error("Error setting album status:", error);
+    throw error;
+  }
 }
 
-export function getUserAlbumsByStatus(
+export async function getUserAlbumsByStatus(
   userId: string,
   status: AlbumStatus
-): UserAlbum[] {
-  const database = getDb();
-  const stmt = database.prepare(
-    "SELECT * FROM user_albums WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
-  );
-  return stmt.all(userId, status) as UserAlbum[];
+): Promise<UserAlbum[]> {
+  const { data, error } = await supabase
+    .from("user_albums")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", status)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error getting user albums by status:", error);
+    throw error;
+  }
+
+  return (data as UserAlbum[]) || [];
 }
 
-export function getAllUserAlbumIds(userId: string): string[] {
-  const database = getDb();
-  const stmt = database.prepare("SELECT album_id FROM user_albums WHERE user_id = ?");
-  const results = stmt.all(userId) as { album_id: string }[];
-  return results.map((r) => r.album_id);
+export async function getAllUserAlbumIds(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("user_albums")
+    .select("album_id")
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("Error getting all user album IDs:", error);
+    throw error;
+  }
+
+  return (data || []).map((r) => r.album_id);
 }
 
 // Get album IDs that should be filtered from recommendations
 // Excludes skipped albums that have expired (older than 48 hours)
-export function getActiveUserAlbumIds(userId: string): string[] {
-  const database = getDb();
-  const stmt = database.prepare(`
-    SELECT album_id FROM user_albums
-    WHERE user_id = ?
-    AND (
-      status != 'skipped'
-      OR created_at > unixepoch() - ?
-    )
-  `);
-  const results = stmt.all(userId, SKIP_EXPIRY_SECONDS) as { album_id: string }[];
-  return results.map((r) => r.album_id);
+export async function getActiveUserAlbumIds(userId: string): Promise<string[]> {
+  const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
+
+  // Get all non-skipped albums and skipped albums that haven't expired
+  const { data, error } = await supabase
+    .from("user_albums")
+    .select("album_id, status, created_at")
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("Error getting active user album IDs:", error);
+    throw error;
+  }
+
+  return (data || [])
+    .filter((row) => row.status !== "skipped" || row.created_at > expiryTime)
+    .map((r) => r.album_id);
 }
 
 // Clean up expired skipped albums
-export function cleanupExpiredSkips(userId: string): void {
-  const database = getDb();
-  const stmt = database.prepare(`
-    DELETE FROM user_albums
-    WHERE user_id = ?
-    AND status = 'skipped'
-    AND created_at <= unixepoch() - ?
-  `);
-  stmt.run(userId, SKIP_EXPIRY_SECONDS);
+export async function cleanupExpiredSkips(userId: string): Promise<void> {
+  const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
+
+  const { error } = await supabase
+    .from("user_albums")
+    .delete()
+    .eq("user_id", userId)
+    .eq("status", "skipped")
+    .lte("created_at", expiryTime);
+
+  if (error) {
+    console.error("Error cleaning up expired skips:", error);
+    throw error;
+  }
 }
 
-export function removeAlbumStatus(userId: string, albumId: string): void {
-  const database = getDb();
-  const stmt = database.prepare("DELETE FROM user_albums WHERE user_id = ? AND album_id = ?");
-  stmt.run(userId, albumId);
+export async function removeAlbumStatus(
+  userId: string,
+  albumId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("user_albums")
+    .delete()
+    .eq("user_id", userId)
+    .eq("album_id", albumId);
+
+  if (error) {
+    console.error("Error removing album status:", error);
+    throw error;
+  }
 }
 
 // Vinyl cache operations
@@ -225,73 +219,114 @@ export interface VinylCacheEntry {
   id: number;
   artist_name: string;
   album_name: string;
-  has_vinyl: number;
+  has_vinyl: boolean;
   discogs_url: string | null;
   checked_at: number;
 }
 
-export function getCachedVinylStatus(
+export async function getCachedVinylStatus(
   artistName: string,
   albumName: string
-): { hasVinyl: boolean; discogsUrl: string | null } | null {
-  const database = getDb();
-  const stmt = database.prepare(`
-    SELECT * FROM vinyl_cache
-    WHERE artist_name = ? AND album_name = ?
-    AND checked_at > unixepoch() - ?
-  `);
-  const result = stmt.get(artistName.toLowerCase(), albumName.toLowerCase(), CACHE_TTL_SECONDS) as VinylCacheEntry | undefined;
+): Promise<{ hasVinyl: boolean; discogsUrl: string | null } | null> {
+  const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
 
-  if (!result) return null;
+  const { data, error } = await supabase
+    .from("vinyl_cache")
+    .select("*")
+    .eq("artist_name", artistName.toLowerCase())
+    .eq("album_name", albumName.toLowerCase())
+    .gt("checked_at", expiryTime)
+    .single();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      // No rows returned
+      return null;
+    }
+    console.error("Error getting cached vinyl status:", error);
+    throw error;
+  }
 
   return {
-    hasVinyl: result.has_vinyl === 1,
-    discogsUrl: result.discogs_url,
+    hasVinyl: data.has_vinyl,
+    discogsUrl: data.discogs_url,
   };
 }
 
-export function setCachedVinylStatus(
+export async function setCachedVinylStatus(
   artistName: string,
   albumName: string,
   hasVinyl: boolean,
   discogsUrl?: string
-): void {
-  const database = getDb();
-  const stmt = database.prepare(`
-    INSERT INTO vinyl_cache (artist_name, album_name, has_vinyl, discogs_url, checked_at)
-    VALUES (@artist_name, @album_name, @has_vinyl, @discogs_url, unixepoch())
-    ON CONFLICT(artist_name, album_name) DO UPDATE SET
-      has_vinyl = @has_vinyl,
-      discogs_url = @discogs_url,
-      checked_at = unixepoch()
-  `);
-  stmt.run({
-    artist_name: artistName.toLowerCase(),
-    album_name: albumName.toLowerCase(),
-    has_vinyl: hasVinyl ? 1 : 0,
-    discogs_url: discogsUrl || null,
-  });
+): Promise<void> {
+  const { error } = await supabase
+    .from("vinyl_cache")
+    .upsert(
+      {
+        artist_name: artistName.toLowerCase(),
+        album_name: albumName.toLowerCase(),
+        has_vinyl: hasVinyl,
+        discogs_url: discogsUrl || null,
+        checked_at: Math.floor(Date.now() / 1000),
+      },
+      {
+        onConflict: "artist_name,album_name",
+      }
+    );
+
+  if (error) {
+    console.error("Error setting cached vinyl status:", error);
+    throw error;
+  }
 }
 
-export function getBulkCachedVinylStatus(
+export async function getBulkCachedVinylStatus(
   albums: { artist: string; album: string }[]
-): Map<string, { hasVinyl: boolean; discogsUrl: string | null }> {
-  const database = getDb();
+): Promise<Map<string, { hasVinyl: boolean; discogsUrl: string | null }>> {
   const results = new Map<string, { hasVinyl: boolean; discogsUrl: string | null }>();
+  const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
 
-  const stmt = database.prepare(`
-    SELECT * FROM vinyl_cache
-    WHERE artist_name = ? AND album_name = ?
-    AND checked_at > unixepoch() - ?
-  `);
+  // Build a list of keys to query
+  const queries = albums.map((a) => ({
+    artist: a.artist.toLowerCase(),
+    album: a.album.toLowerCase(),
+  }));
 
-  for (const { artist, album } of albums) {
-    const key = `${artist.toLowerCase()}|${album.toLowerCase()}`;
-    const result = stmt.get(artist.toLowerCase(), album.toLowerCase(), CACHE_TTL_SECONDS) as VinylCacheEntry | undefined;
+  // Query all at once using OR conditions
+  // Supabase doesn't support complex OR queries easily, so we'll query each one
+  // But we'll do it in parallel for efficiency
+  const promises = queries.map(async ({ artist, album }) => {
+    const { data, error } = await supabase
+      .from("vinyl_cache")
+      .select("*")
+      .eq("artist_name", artist)
+      .eq("album_name", album)
+      .gt("checked_at", expiryTime)
+      .single();
+
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null; // No rows
+      }
+      // Log but don't throw - we want to continue with other queries
+      console.error("Error in bulk vinyl status query:", error);
+      return null;
+    }
+
+    return {
+      key: `${artist}|${album}`,
+      hasVinyl: data.has_vinyl,
+      discogsUrl: data.discogs_url,
+    };
+  });
+
+  const resultsArray = await Promise.all(promises);
+
+  for (const result of resultsArray) {
     if (result) {
-      results.set(key, {
-        hasVinyl: result.has_vinyl === 1,
-        discogsUrl: result.discogs_url,
+      results.set(result.key, {
+        hasVinyl: result.hasVinyl,
+        discogsUrl: result.discogsUrl,
       });
     }
   }

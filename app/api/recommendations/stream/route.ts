@@ -62,10 +62,10 @@ export async function GET() {
 
         try {
           // Clean up expired skipped albums so they can be shown again
-          cleanupExpiredSkips(userId);
+          await cleanupExpiredSkips(userId);
 
           // Get albums user has already actioned (excluding expired skips)
-          const actionedAlbumIds = new Set(getActiveUserAlbumIds(userId));
+          const actionedAlbumIds = new Set(await getActiveUserAlbumIds(userId));
           const seenAlbumIds = new Set<string>();
 
           // Helper to process and stream an album
@@ -229,8 +229,8 @@ export async function GET() {
           }
 
           // 2. Get collection-based recommendations
-          const ownedAlbums = getUserAlbumsByStatus(userId, "owned");
-          const wishlistAlbums = getUserAlbumsByStatus(userId, "wishlist");
+          const ownedAlbums = await getUserAlbumsByStatus(userId, "owned");
+          const wishlistAlbums = await getUserAlbumsByStatus(userId, "wishlist");
           const allArtists = [
             ...ownedAlbums.map((a) => a.artist_name),
             ...wishlistAlbums.map((a) => a.artist_name),

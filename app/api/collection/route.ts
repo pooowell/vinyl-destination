@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     // If specific status requested, return just that
     if (status === "not_interested") {
-      const notInterestedAlbums = getUserAlbumsByStatus(auth.userId, "not_interested");
+      const notInterestedAlbums = await getUserAlbumsByStatus(auth.userId, "not_interested");
       return NextResponse.json({
         notInterested: notInterestedAlbums.map((album) => ({
           id: album.album_id,
@@ -31,8 +31,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Default: return owned and wishlist
-    const ownedAlbums = getUserAlbumsByStatus(auth.userId, "owned");
-    const wishlistAlbums = getUserAlbumsByStatus(auth.userId, "wishlist");
+    const ownedAlbums = await getUserAlbumsByStatus(auth.userId, "owned");
+    const wishlistAlbums = await getUserAlbumsByStatus(auth.userId, "wishlist");
 
     const formatAlbum = (album: {
       album_id: string;
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
 
-    setAlbumStatus(
+    await setAlbumStatus(
       auth.userId,
       {
         album_id: albumId,
@@ -120,7 +120,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    removeAlbumStatus(auth.userId, albumId);
+    await removeAlbumStatus(auth.userId, albumId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

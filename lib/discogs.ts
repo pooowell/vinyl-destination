@@ -84,7 +84,7 @@ export async function checkVinylAvailability(
   discogsUrl: string | null;
 }> {
   // Check database cache first
-  const cached = getCachedVinylStatus(artist, album);
+  const cached = await getCachedVinylStatus(artist, album);
   if (cached !== null) {
     return {
       available: cached.hasVinyl,
@@ -98,7 +98,7 @@ export async function checkVinylAvailability(
     const discogsUrl = available ? `https://www.discogs.com${releases[0].uri}` : null;
 
     // Cache the result in database
-    setCachedVinylStatus(artist, album, available, discogsUrl || undefined);
+    await setCachedVinylStatus(artist, album, available, discogsUrl || undefined);
 
     return { available, discogsUrl };
   } catch (error) {
@@ -114,7 +114,7 @@ export async function batchCheckVinylAvailability(
   const results = new Map<string, { available: boolean; discogsUrl: string | null }>();
 
   // First, check database cache for all albums
-  const dbCache = getBulkCachedVinylStatus(
+  const dbCache = await getBulkCachedVinylStatus(
     albums.map((a) => ({ artist: a.artist, album: a.album }))
   );
 
