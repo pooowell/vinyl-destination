@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "../mocks/server";
+import { server } from "../../mocks/server";
 
 // Mock db functions to isolate Discogs API testing
 const mockGetCachedVinylStatus = vi.fn();

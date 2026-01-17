@@ -19,7 +19,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "unit",
-          include: ["tests/**/*.spec.ts", "tests/**/*.spec.tsx"],
+          include: ["tests/unit/**/*.spec.ts", "tests/unit/**/*.spec.tsx"],
           setupFiles: ["./tests/setup.unit.ts"],
         },
       },
@@ -28,7 +28,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "integration",
-          include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+          include: ["tests/integration/**/*.test.ts", "tests/integration/**/*.test.tsx"],
           setupFiles: ["./tests/setup.ts"],
         },
       },
