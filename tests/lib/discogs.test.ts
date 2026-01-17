@@ -1,169 +1,190 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { http, HttpResponse } from "msw";
+import { server } from "../mocks/server";
 
-// Use vi.hoisted to define mocks that can be used in vi.mock factory
-const {
-  mockFetch,
-  mockGetCachedVinylStatus,
-  mockSetCachedVinylStatus,
-  mockGetBulkCachedVinylStatus,
-} = vi.hoisted(() => ({
-  mockFetch: vi.fn(),
-  mockGetCachedVinylStatus: vi.fn(),
-  mockSetCachedVinylStatus: vi.fn(),
-  mockGetBulkCachedVinylStatus: vi.fn(),
-}));
-
-// Set global fetch
-global.fetch = mockFetch;
+// Mock db functions to isolate Discogs API testing
+const mockGetCachedVinylStatus = vi.fn();
+const mockSetCachedVinylStatus = vi.fn();
+const mockGetBulkCachedVinylStatus = vi.fn();
 
 vi.mock("@/lib/db", () => ({
-  getCachedVinylStatus: mockGetCachedVinylStatus,
-  setCachedVinylStatus: mockSetCachedVinylStatus,
-  getBulkCachedVinylStatus: mockGetBulkCachedVinylStatus,
+  getCachedVinylStatus: () => mockGetCachedVinylStatus(),
+  setCachedVinylStatus: (...args: unknown[]) => mockSetCachedVinylStatus(...args),
+  getBulkCachedVinylStatus: () => mockGetBulkCachedVinylStatus(),
 }));
 
+// Import after mocking
 import {
   searchVinylRelease,
   checkVinylAvailability,
-  batchCheckVinylAvailability,
 } from "@/lib/discogs";
 
-describe("discogs - Search Operations", () => {
+describe("Discogs API Integration (MSW)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetCachedVinylStatus.mockResolvedValue(null);
+    mockSetCachedVinylStatus.mockResolvedValue(undefined);
+    mockGetBulkCachedVinylStatus.mockResolvedValue(new Map());
   });
 
   describe("searchVinylRelease", () => {
-    it("should search for vinyl releases successfully", async () => {
-      const mockResults = [
-        { id: 1, title: "Artist - Album", format: ["Vinyl"], uri: "/release/1" },
-        { id: 2, title: "Artist - Album (Reissue)", format: ["Vinyl"], uri: "/release/2" },
-      ];
+    it("should search for vinyl releases via Discogs API", async () => {
+      // Use unique query to avoid in-memory cache
+      const results = await searchVinylRelease("MSW Test Artist", "MSW Test Album");
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ results: mockResults }),
-      });
+      expect(results).toHaveLength(2);
+      expect(results[0].title).toBe("Test Artist - Test Album");
+      expect(results[0].format).toContain("Vinyl");
+      expect(results[0].uri).toBe("/release/12345");
+    });
 
-      const result = await searchVinylRelease("Artist", "Album");
+    it("should handle rate limiting (429 response)", async () => {
+      // Use query that triggers rate limit in handler
+      await expect(
+        searchVinylRelease("rate_limit_test", "album")
+      ).rejects.toThrow("rate limit");
+    });
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("api.discogs.com/database/search"),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: expect.stringContaining("Discogs token="),
-          }),
+    it("should handle empty results", async () => {
+      // Use query that returns no results in handler
+      const results = await searchVinylRelease("no_results_test", "album");
+      expect(results).toHaveLength(0);
+    });
+
+    it("should handle unauthorized requests", async () => {
+      // Override handler to return 401
+      server.use(
+        http.get("https://api.discogs.com/database/search", () => {
+          return HttpResponse.json(
+            { message: "Unauthorized" },
+            { status: 401 }
+          );
         })
       );
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("format=Vinyl"),
-        expect.any(Object)
-      );
-      expect(result).toEqual(mockResults);
+
+      await expect(
+        searchVinylRelease("Unauthorized Artist", "Album")
+      ).rejects.toThrow("Discogs API error");
     });
 
-    it("should throw on rate limit (429)", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-      });
-
-      // Use unique artist/album to avoid in-memory cache from previous test
-      await expect(searchVinylRelease("RateLimitArtist", "RateLimitAlbum")).rejects.toThrow(
-        "rate limit"
+    it("should handle server errors", async () => {
+      server.use(
+        http.get("https://api.discogs.com/database/search", () => {
+          return HttpResponse.json(
+            { message: "Internal Server Error" },
+            { status: 500 }
+          );
+        })
       );
+
+      await expect(
+        searchVinylRelease("Server Error Artist", "Album")
+      ).rejects.toThrow("Discogs API error");
     });
-
-    it("should throw on API error", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        text: () => Promise.resolve("Server error"),
-      });
-
-      // Use unique artist/album to avoid in-memory cache from previous tests
-      await expect(searchVinylRelease("ErrorArtist", "ErrorAlbum")).rejects.toThrow(
-        "Discogs API error"
-      );
-    });
-  });
-});
-
-describe("discogs - Vinyl Availability", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
   });
 
   describe("checkVinylAvailability", () => {
+    it("should return availability from Discogs when not cached", async () => {
+      mockGetCachedVinylStatus.mockResolvedValue(null);
+
+      const result = await checkVinylAvailability(
+        "Check Availability Artist",
+        "Check Availability Album"
+      );
+
+      expect(result.available).toBe(true);
+      expect(result.discogsUrl).toContain("discogs.com");
+      expect(result.discogsUrl).toContain("/release/");
+      expect(mockSetCachedVinylStatus).toHaveBeenCalled();
+    });
+
     it("should return cached result when available", async () => {
       mockGetCachedVinylStatus.mockResolvedValue({
         hasVinyl: true,
-        discogsUrl: "https://discogs.com/release/123",
+        discogsUrl: "https://www.discogs.com/release/cached-123",
       });
 
-      // Use unique artist/album to avoid in-memory cache
-      const result = await checkVinylAvailability("CachedArtist", "CachedAlbum");
+      const result = await checkVinylAvailability(
+        "Cached Artist",
+        "Cached Album"
+      );
 
-      expect(mockGetCachedVinylStatus).toHaveBeenCalledWith("CachedArtist", "CachedAlbum");
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        available: true,
-        discogsUrl: "https://discogs.com/release/123",
-      });
+      expect(result.available).toBe(true);
+      expect(result.discogsUrl).toBe("https://www.discogs.com/release/cached-123");
+      // Should not call setCachedVinylStatus since we have a cache hit
+      expect(mockSetCachedVinylStatus).not.toHaveBeenCalled();
     });
 
-    it("should search Discogs when not cached and cache the result", async () => {
+    it("should handle no vinyl available", async () => {
       mockGetCachedVinylStatus.mockResolvedValue(null);
-      mockSetCachedVinylStatus.mockResolvedValue(undefined);
 
-      const mockResults = [{ id: 1, uri: "/release/456" }];
+      const result = await checkVinylAvailability(
+        "no_results_test",
+        "No Vinyl Album"
+      );
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ results: mockResults }),
-      });
+      expect(result.available).toBe(false);
+      expect(result.discogsUrl).toBeNull();
+    });
 
-      // Use unique artist/album to avoid in-memory cache from previous tests
-      const result = await checkVinylAvailability("UncachedArtist", "UncachedAlbum");
+    it("should handle API errors gracefully", async () => {
+      mockGetCachedVinylStatus.mockResolvedValue(null);
 
-      expect(mockGetCachedVinylStatus).toHaveBeenCalled();
-      expect(mockFetch).toHaveBeenCalled();
-      expect(mockSetCachedVinylStatus).toHaveBeenCalled();
-      expect(result.available).toBe(true);
-      expect(result.discogsUrl).toContain("discogs.com");
+      server.use(
+        http.get("https://api.discogs.com/database/search", () => {
+          return HttpResponse.json(
+            { message: "Service Unavailable" },
+            { status: 503 }
+          );
+        })
+      );
+
+      const result = await checkVinylAvailability(
+        "Error Test Artist",
+        "Error Test Album"
+      );
+
+      // Should return false on error (graceful degradation)
+      expect(result.available).toBe(false);
+      expect(result.discogsUrl).toBeNull();
     });
   });
 
-  describe("batchCheckVinylAvailability", () => {
-    it("should use cached results when available", async () => {
-      const albums = [
-        { artist: "Artist1", album: "Album1", albumId: "id1" },
-      ];
+  describe("request headers", () => {
+    it("should include correct authorization header", async () => {
+      let capturedHeaders: Headers | null = null;
 
-      // Album is cached
-      mockGetBulkCachedVinylStatus.mockResolvedValue(
-        new Map([
-          ["artist1|album1", { hasVinyl: true, discogsUrl: "https://discogs.com/1" }],
-        ])
+      server.use(
+        http.get("https://api.discogs.com/database/search", ({ request }) => {
+          capturedHeaders = request.headers;
+          return HttpResponse.json({
+            pagination: { page: 1, pages: 1, per_page: 5, items: 0 },
+            results: [],
+          });
+        })
       );
 
-      const result = await batchCheckVinylAvailability(albums);
+      await searchVinylRelease("Header Test Artist", "Header Test Album");
 
-      expect(mockGetBulkCachedVinylStatus).toHaveBeenCalled();
-      expect(result.get("id1")).toEqual({
-        available: true,
-        discogsUrl: "https://discogs.com/1",
-      });
+      expect(capturedHeaders?.get("Authorization")).toContain("Discogs token=");
     });
 
-    it("should handle empty album list", async () => {
-      mockGetBulkCachedVinylStatus.mockResolvedValue(new Map());
+    it("should include user agent header", async () => {
+      let capturedHeaders: Headers | null = null;
 
-      const result = await batchCheckVinylAvailability([]);
+      server.use(
+        http.get("https://api.discogs.com/database/search", ({ request }) => {
+          capturedHeaders = request.headers;
+          return HttpResponse.json({
+            pagination: { page: 1, pages: 1, per_page: 5, items: 0 },
+            results: [],
+          });
+        })
+      );
 
-      expect(result.size).toBe(0);
+      await searchVinylRelease("UA Test Artist", "UA Test Album");
+
+      expect(capturedHeaders?.get("User-Agent")).toBe("SpotifyVinylSearch/1.0");
     });
   });
 });

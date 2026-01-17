@@ -4,8 +4,6 @@ import { vi } from "vitest";
 export const createMockQueryBuilder = (mockData: unknown = null, mockError: unknown = null) => {
   const builder: Record<string, ReturnType<typeof vi.fn>> = {};
 
-  const chainable = () => builder;
-
   builder.from = vi.fn().mockReturnValue(builder);
   builder.select = vi.fn().mockReturnValue(builder);
   builder.insert = vi.fn().mockReturnValue(builder);
@@ -32,7 +30,7 @@ export const createMockQueryBuilder = (mockData: unknown = null, mockError: unkn
 // Create a mock Supabase client
 export const createMockSupabaseClient = () => {
   return {
-    from: vi.fn((table: string) => createMockQueryBuilder()),
+    from: vi.fn((_table: string) => createMockQueryBuilder()),
   };
 };
 
