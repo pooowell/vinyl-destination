@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
 import {
   getTopTracks,
   getSavedAlbums,

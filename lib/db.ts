@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { getSupabase } from "./supabase";
 
 // User operations
 export interface User {
@@ -19,6 +19,7 @@ export async function upsertUser(user: {
   refresh_token: string;
   token_expires_at: number;
 }): Promise<void> {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from("users")
     .upsert({
@@ -37,6 +38,7 @@ export async function upsertUser(user: {
 }
 
 export async function getUser(id: string): Promise<User | undefined> {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from("users")
     .select("*")
@@ -45,7 +47,6 @@ export async function getUser(id: string): Promise<User | undefined> {
 
   if (error) {
     if (error.code === "PGRST116") {
-      // No rows returned
       return undefined;
     }
     console.error("Error getting user:", error);
@@ -61,6 +62,7 @@ export async function updateUserTokens(
   refreshToken: string,
   expiresAt: number
 ): Promise<void> {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from("users")
     .update({
@@ -102,6 +104,7 @@ export async function setAlbumStatus(
   },
   status: AlbumStatus
 ): Promise<void> {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from("user_albums")
     .upsert(
@@ -129,6 +132,7 @@ export async function getUserAlbumsByStatus(
   userId: string,
   status: AlbumStatus
 ): Promise<UserAlbum[]> {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from("user_albums")
     .select("*")
@@ -145,6 +149,7 @@ export async function getUserAlbumsByStatus(
 }
 
 export async function getAllUserAlbumIds(userId: string): Promise<string[]> {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from("user_albums")
     .select("album_id")
@@ -158,12 +163,10 @@ export async function getAllUserAlbumIds(userId: string): Promise<string[]> {
   return (data || []).map((r) => r.album_id);
 }
 
-// Get album IDs that should be filtered from recommendations
-// Excludes skipped albums that have expired (older than 48 hours)
 export async function getActiveUserAlbumIds(userId: string): Promise<string[]> {
   const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
+  const supabase = await getSupabase();
 
-  // Get all non-skipped albums and skipped albums that haven't expired
   const { data, error } = await supabase
     .from("user_albums")
     .select("album_id, status, created_at")
@@ -179,9 +182,9 @@ export async function getActiveUserAlbumIds(userId: string): Promise<string[]> {
     .map((r) => r.album_id);
 }
 
-// Clean up expired skipped albums
 export async function cleanupExpiredSkips(userId: string): Promise<void> {
   const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
+  const supabase = await getSupabase();
 
   const { error } = await supabase
     .from("user_albums")
@@ -200,6 +203,7 @@ export async function removeAlbumStatus(
   userId: string,
   albumId: string
 ): Promise<void> {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from("user_albums")
     .delete()
@@ -229,6 +233,7 @@ export async function getCachedVinylStatus(
   albumName: string
 ): Promise<{ hasVinyl: boolean; discogsUrl: string | null } | null> {
   const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
+  const supabase = await getSupabase();
 
   const { data, error } = await supabase
     .from("vinyl_cache")
@@ -240,7 +245,6 @@ export async function getCachedVinylStatus(
 
   if (error) {
     if (error.code === "PGRST116") {
-      // No rows returned
       return null;
     }
     console.error("Error getting cached vinyl status:", error);
@@ -259,6 +263,7 @@ export async function setCachedVinylStatus(
   hasVinyl: boolean,
   discogsUrl?: string
 ): Promise<void> {
+  const supabase = await getSupabase();
   const { error } = await supabase
     .from("vinyl_cache")
     .upsert(
@@ -285,16 +290,13 @@ export async function getBulkCachedVinylStatus(
 ): Promise<Map<string, { hasVinyl: boolean; discogsUrl: string | null }>> {
   const results = new Map<string, { hasVinyl: boolean; discogsUrl: string | null }>();
   const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
+  const supabase = await getSupabase();
 
-  // Build a list of keys to query
   const queries = albums.map((a) => ({
     artist: a.artist.toLowerCase(),
     album: a.album.toLowerCase(),
   }));
 
-  // Query all at once using OR conditions
-  // Supabase doesn't support complex OR queries easily, so we'll query each one
-  // But we'll do it in parallel for efficiency
   const promises = queries.map(async ({ artist, album }) => {
     const { data, error } = await supabase
       .from("vinyl_cache")
@@ -306,9 +308,8 @@ export async function getBulkCachedVinylStatus(
 
     if (error) {
       if (error.code === "PGRST116") {
-        return null; // No rows
+        return null;
       }
-      // Log but don't throw - we want to continue with other queries
       console.error("Error in bulk vinyl status query:", error);
       return null;
     }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { searchVinylRelease } from "@/lib/discogs";
 
+export const dynamic = "force-dynamic";
+
 const SPOTIFY_API_URL = "https://api.spotify.com/v1";
 
 interface SpotifyTrack {

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { clearSessionCookie } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   await clearSessionCookie();
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
