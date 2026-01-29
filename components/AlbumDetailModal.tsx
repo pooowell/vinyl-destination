@@ -76,6 +76,7 @@ export default function AlbumDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (isOpen && albumId) {
@@ -90,6 +91,19 @@ export default function AlbumDetailModal({
       setPlayingTrackId(null);
     };
   }, [isOpen, albumId]);
+
+  // Auto-focus the dialog when opened
+  useEffect(() => {
+    if (isOpen && dialogRef.current) {
+      dialogRef.current.focus();
+    }
+  }, [isOpen]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+    }
+  };
 
   const fetchDetails = async () => {
     setIsLoading(true);
@@ -140,10 +154,19 @@ export default function AlbumDetailModal({
       />
 
       {/* Modal */}
-      <div className="relative bg-zinc-900 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-album-title"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative bg-zinc-900 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+      >
         {/* Header with close button */}
         <button
           onClick={onClose}
+          aria-label="Close"
           className="absolute top-4 right-4 z-10 p-2 rounded-full bg-black/50 hover:bg-black/70 transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -173,7 +196,7 @@ export default function AlbumDetailModal({
             </div>
 
             <div className="flex-1 min-w-0">
-              <h2 className="text-2xl font-bold truncate">{albumName}</h2>
+              <h2 id="modal-album-title" className="text-2xl font-bold truncate">{albumName}</h2>
               <p className="text-zinc-400 mt-1">{artistName}</p>
 
               {details && (
@@ -296,6 +319,7 @@ export default function AlbumDetailModal({
                               <button
                                 onClick={() => playPreview(track)}
                                 disabled={!track.previewUrl}
+                                aria-label={playingTrackId === track.id ? `Pause preview of ${track.name}` : `Play preview of ${track.name}`}
                                 className={`w-8 h-8 flex items-center justify-center rounded-full flex-shrink-0 transition-colors ${
                                   track.previewUrl
                                     ? "bg-zinc-800 hover:bg-zinc-700"
@@ -374,6 +398,7 @@ export default function AlbumDetailModal({
             </button>
             <button
               onClick={onSkip}
+              aria-label="Skip album"
               className="flex-1 py-3 bg-zinc-800 text-white font-semibold rounded-lg hover:bg-zinc-700 transition-colors"
             >
               Skip

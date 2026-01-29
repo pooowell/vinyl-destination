@@ -99,6 +99,13 @@ export default function AlbumCard({
     }
   };
 
+  const handleCardKeyDown = (e: React.KeyboardEvent) => {
+    if (onClick && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      onClick(album);
+    }
+  };
+
   const banner = listeningStats ? getStatsBanner(listeningStats) : null;
 
   return (
@@ -107,6 +114,8 @@ export default function AlbumCard({
         onClick ? "cursor-pointer" : ""
       }`}
       onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+      {...(onClick ? { role: "button", tabIndex: 0 } : {})}
     >
       <div className="aspect-square relative">
         {album.imageUrl ? (
@@ -136,6 +145,7 @@ export default function AlbumCard({
             disabled={isLoading}
             className="absolute top-2 left-2 w-7 h-7 flex items-center justify-center rounded-full bg-black/60 text-zinc-400 hover:bg-black/80 hover:text-white disabled:opacity-50 transition-all opacity-0 group-hover:opacity-100"
             title="Skip for now"
+            aria-label="Skip this album"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
