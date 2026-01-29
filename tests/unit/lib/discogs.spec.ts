@@ -26,6 +26,7 @@ import {
   searchVinylRelease,
   checkVinylAvailability,
   batchCheckVinylAvailability,
+  getMostCollectedVinyl,
 } from "@/lib/discogs";
 
 describe("discogs - Search Operations", () => {
@@ -164,6 +165,136 @@ describe("discogs - Vinyl Availability", () => {
       const result = await batchCheckVinylAvailability([]);
 
       expect(result.size).toBe(0);
+    });
+
+    it("should fetch uncached albums from Discogs API", async () => {
+      const albums = [
+        { artist: "Uncached Artist", album: "Uncached Album", albumId: "uncached1" },
+      ];
+
+      // No cache hit
+      mockGetBulkCachedVinylStatus.mockResolvedValue(new Map());
+      mockGetCachedVinylStatus.mockResolvedValue(null);
+      mockSetCachedVinylStatus.mockResolvedValue(undefined);
+
+      const mockResults = [{ id: 1, uri: "/release/789" }];
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ results: mockResults }),
+      });
+
+      const result = await batchCheckVinylAvailability(albums);
+
+      expect(mockGetBulkCachedVinylStatus).toHaveBeenCalled();
+      expect(result.get("uncached1")?.available).toBe(true);
+    });
+
+    it("should handle mixed cached and uncached albums", async () => {
+      const albums = [
+        { artist: "Cached Artist", album: "Cached Album", albumId: "cached1" },
+        { artist: "Fresh Artist", album: "Fresh Album", albumId: "fresh1" },
+      ];
+
+      // One cached, one not
+      mockGetBulkCachedVinylStatus.mockResolvedValue(
+        new Map([
+          ["cached artist|cached album", { hasVinyl: true, discogsUrl: "https://discogs.com/cached" }],
+        ])
+      );
+      mockGetCachedVinylStatus.mockResolvedValue(null);
+      mockSetCachedVinylStatus.mockResolvedValue(undefined);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ results: [{ id: 2, uri: "/release/999" }] }),
+      });
+
+      const result = await batchCheckVinylAvailability(albums);
+
+      expect(result.get("cached1")).toEqual({
+        available: true,
+        discogsUrl: "https://discogs.com/cached",
+      });
+      expect(result.get("fresh1")?.available).toBe(true);
+    });
+  });
+});
+
+describe("discogs - Most Collected Vinyl", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("getMostCollectedVinyl", () => {
+    it("should fetch most collected vinyl releases", async () => {
+      const mockResults = [
+        { id: 1, title: "Classic Album 1", format: ["Vinyl"] },
+        { id: 2, title: "Classic Album 2", format: ["Vinyl"] },
+      ];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ results: mockResults }),
+      });
+
+      const result = await getMostCollectedVinyl(undefined, 20);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("sort=have"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("sort_order=desc"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("per_page=20"),
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResults);
+    });
+
+    it("should filter by genre when provided", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ results: [] }),
+      });
+
+      await getMostCollectedVinyl("Rock", 10);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("genre=Rock"),
+        expect.any(Object)
+      );
+    });
+
+    it("should return empty array on API error", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve("Server error"),
+      });
+
+      // Use unique genre to avoid in-memory cache
+      const result = await getMostCollectedVinyl("UniqueGenreForErrorTest", 20);
+
+      expect(result).toEqual([]);
+    });
+
+    it("should handle rate limiting gracefully", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+      });
+
+      // Use unique genre to avoid in-memory cache
+      const result = await getMostCollectedVinyl("UniqueGenreForRateLimitTest");
+
+      expect(result).toEqual([]);
     });
   });
 });

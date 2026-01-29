@@ -144,6 +144,139 @@ export const spotifyHandlers = [
       ],
     });
   }),
+
+  // Top artists
+  http.get("https://api.spotify.com/v1/me/top/artists", ({ request }) => {
+    const auth = request.headers.get("Authorization");
+    if (!auth || auth === "Bearer expired_token") {
+      return HttpResponse.json({ error: { message: "Unauthorized" } }, { status: 401 });
+    }
+    return HttpResponse.json({
+      items: [
+        {
+          id: "artist1",
+          name: "Top Artist 1",
+          genres: ["rock", "alternative"],
+          images: [{ url: "https://example.com/artist1.jpg" }],
+        },
+        {
+          id: "artist2",
+          name: "Top Artist 2",
+          genres: ["pop"],
+          images: [{ url: "https://example.com/artist2.jpg" }],
+        },
+      ],
+      total: 2,
+      limit: 20,
+      offset: 0,
+    });
+  }),
+
+  // Artist albums
+  http.get("https://api.spotify.com/v1/artists/:artistId/albums", ({ request, params }) => {
+    const auth = request.headers.get("Authorization");
+    if (!auth || auth === "Bearer expired_token") {
+      return HttpResponse.json({ error: { message: "Unauthorized" } }, { status: 401 });
+    }
+
+    const artistId = params.artistId;
+    if (artistId === "invalid_artist") {
+      return HttpResponse.json({ error: { message: "Artist not found" } }, { status: 404 });
+    }
+
+    return HttpResponse.json({
+      items: [
+        {
+          id: "artist_album1",
+          name: "Artist Album 1",
+          album_type: "album",
+          release_date: "2023-01-01",
+          artists: [{ id: artistId, name: "Test Artist" }],
+          images: [{ url: "https://example.com/album1.jpg" }],
+        },
+        {
+          id: "artist_album2",
+          name: "Artist Album 2",
+          album_type: "album",
+          release_date: "2021-06-15",
+          artists: [{ id: artistId, name: "Test Artist" }],
+          images: [{ url: "https://example.com/album2.jpg" }],
+        },
+      ],
+      total: 2,
+      limit: 50,
+      offset: 0,
+    });
+  }),
+
+  // Search (for artist lookup in recommendations)
+  http.get("https://api.spotify.com/v1/search", ({ request }) => {
+    const auth = request.headers.get("Authorization");
+    if (!auth || auth === "Bearer expired_token") {
+      return HttpResponse.json({ error: { message: "Unauthorized" } }, { status: 401 });
+    }
+
+    const url = new URL(request.url);
+    const query = url.searchParams.get("q");
+    const type = url.searchParams.get("type");
+
+    if (type === "artist") {
+      if (query?.includes("notfound")) {
+        return HttpResponse.json({
+          artists: { items: [] },
+        });
+      }
+      return HttpResponse.json({
+        artists: {
+          items: [
+            {
+              id: "found_artist_id",
+              name: query || "Found Artist",
+              genres: ["rock"],
+            },
+          ],
+        },
+      });
+    }
+
+    return HttpResponse.json({ error: { message: "Unsupported search type" } }, { status: 400 });
+  }),
+
+  // Recommendations
+  http.get("https://api.spotify.com/v1/recommendations", ({ request }) => {
+    const auth = request.headers.get("Authorization");
+    if (!auth || auth === "Bearer expired_token") {
+      return HttpResponse.json({ error: { message: "Unauthorized" } }, { status: 401 });
+    }
+
+    return HttpResponse.json({
+      tracks: [
+        {
+          id: "rec_track1",
+          name: "Recommended Track 1",
+          album: {
+            id: "rec_album1",
+            name: "Recommended Album 1",
+            artists: [{ name: "Rec Artist 1" }],
+            images: [{ url: "https://example.com/rec1.jpg" }],
+          },
+          artists: [{ id: "rec_artist1", name: "Rec Artist 1" }],
+        },
+        {
+          id: "rec_track2",
+          name: "Recommended Track 2",
+          album: {
+            id: "rec_album2",
+            name: "Recommended Album 2",
+            artists: [{ name: "Rec Artist 2" }],
+            images: [{ url: "https://example.com/rec2.jpg" }],
+          },
+          artists: [{ id: "rec_artist2", name: "Rec Artist 2" }],
+        },
+      ],
+      seeds: [],
+    });
+  }),
 ];
 
 // Discogs API handlers
@@ -176,7 +309,54 @@ export const discogsHandlers = [
       });
     }
 
-    // Return mock vinyl results
+    // Check for sort=have (most collected) - must come before format=Vinyl check
+    // since getMostCollectedVinyl uses both parameters
+    if (url.searchParams.get("sort") === "have") {
+      const genre = url.searchParams.get("genre");
+      return HttpResponse.json({
+        pagination: { page: 1, pages: 1, per_page: 20, items: 3 },
+        results: [
+          {
+            id: 11111,
+            title: "Classic Rock Album",
+            year: "1975",
+            format: ["Vinyl", "LP"],
+            label: ["Classic Records"],
+            type: "release",
+            thumb: "https://example.com/classic1.jpg",
+            cover_image: "https://example.com/classic1_full.jpg",
+            uri: "/release/11111",
+            resource_url: "https://api.discogs.com/releases/11111",
+          },
+          {
+            id: 22222,
+            title: "Another Classic",
+            year: "1980",
+            format: ["Vinyl", "LP"],
+            label: ["Vintage Records"],
+            type: "release",
+            thumb: "https://example.com/classic2.jpg",
+            cover_image: "https://example.com/classic2_full.jpg",
+            uri: "/release/22222",
+            resource_url: "https://api.discogs.com/releases/22222",
+          },
+          {
+            id: 33333,
+            title: genre ? `${genre} Classic` : "Popular Classic",
+            year: "1985",
+            format: ["Vinyl", "LP", "Reissue"],
+            label: ["Reissue Records"],
+            type: "release",
+            thumb: "https://example.com/classic3.jpg",
+            cover_image: "https://example.com/classic3_full.jpg",
+            uri: "/release/33333",
+            resource_url: "https://api.discogs.com/releases/33333",
+          },
+        ],
+      });
+    }
+
+    // Return mock vinyl results for regular search
     if (format === "Vinyl") {
       return HttpResponse.json({
         pagination: { page: 1, pages: 1, per_page: 5, items: 2 },

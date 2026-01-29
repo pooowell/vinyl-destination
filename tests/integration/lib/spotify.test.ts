@@ -6,8 +6,11 @@ import {
   refreshAccessToken,
   getCurrentUser,
   getTopTracks,
+  getTopArtists,
   getSavedAlbums,
   getRecentlyPlayed,
+  getArtistAlbums,
+  getRecommendations,
 } from "@/lib/spotify";
 
 describe("Spotify API Integration (MSW)", () => {
@@ -85,6 +88,90 @@ describe("Spotify API Integration (MSW)", () => {
       expect(response.items).toHaveLength(1);
       expect(response.items[0].track.name).toBe("Recent Track 1");
       expect(response.items[0].played_at).toBe("2024-01-15T12:00:00Z");
+    });
+  });
+
+  describe("getTopArtists", () => {
+    it("should fetch top artists with valid token", async () => {
+      const response = await getTopArtists("valid_access_token", "medium_term", 20);
+
+      expect(response.items).toHaveLength(2);
+      expect(response.items[0].name).toBe("Top Artist 1");
+      expect(response.items[1].name).toBe("Top Artist 2");
+    });
+
+    it("should throw error for expired token", async () => {
+      await expect(getTopArtists("expired_token")).rejects.toThrow();
+    });
+  });
+
+  describe("getArtistAlbums", () => {
+    it("should fetch albums for a valid artist", async () => {
+      const response = await getArtistAlbums("valid_access_token", "artist123", 50);
+
+      expect(response.items).toHaveLength(2);
+      expect(response.items[0].name).toBe("Artist Album 1");
+      expect(response.items[0].album_type).toBe("album");
+    });
+
+    it("should throw error for invalid artist", async () => {
+      await expect(
+        getArtistAlbums("valid_access_token", "invalid_artist")
+      ).rejects.toThrow();
+    });
+
+    it("should throw error for expired token", async () => {
+      await expect(
+        getArtistAlbums("expired_token", "artist123")
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("getRecommendations", () => {
+    it("should get recommendations with seed tracks", async () => {
+      const response = await getRecommendations(
+        "valid_access_token",
+        ["track1", "track2"],
+        [],
+        20
+      );
+
+      expect(response.tracks).toHaveLength(2);
+      expect(response.tracks[0].name).toBe("Recommended Track 1");
+    });
+
+    it("should get recommendations with artist name seeds", async () => {
+      const response = await getRecommendations(
+        "valid_access_token",
+        [],
+        ["Some Artist"],
+        20
+      );
+
+      expect(response.tracks).toHaveLength(2);
+    });
+
+    it("should return empty tracks when no seeds found", async () => {
+      const response = await getRecommendations(
+        "valid_access_token",
+        [],
+        ["notfound_artist"],
+        20
+      );
+
+      // Artist search returns empty, so no seeds available
+      expect(response.tracks).toEqual([]);
+    });
+
+    it("should handle mixed track and artist seeds", async () => {
+      const response = await getRecommendations(
+        "valid_access_token",
+        ["track1"],
+        ["Artist Name"],
+        20
+      );
+
+      expect(response.tracks).toHaveLength(2);
     });
   });
 
