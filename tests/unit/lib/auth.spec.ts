@@ -152,6 +152,19 @@ describe("auth - Session Management", () => {
 });
 
 describe("auth - Authenticated User", () => {
+  /**
+   * Helper: creates a real encrypted session cookie via setSessionCookie,
+   * captures the encrypted value from mockSet, then configures mockGet
+   * to return it. This ensures getSessionUserId decrypts a valid userId
+   * so tests actually reach DB/refresh branches.
+   */
+  async function setupValidSession(userId: string): Promise<void> {
+    await setSessionCookie(userId);
+    const encryptedValue = mockSet.mock.calls[0][1] as string;
+    vi.clearAllMocks();
+    mockGet.mockReturnValue({ value: encryptedValue });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -163,40 +176,102 @@ describe("auth - Authenticated User", () => {
       const result = await getAuthenticatedUser();
 
       expect(result).toBeNull();
+      expect(mockGetUser).not.toHaveBeenCalled();
     });
 
     it("should return null when user not found in database", async () => {
-      // Can't easily test this without proper encryption setup
-      // The getSessionUserId will return null for invalid cookie
-      mockGet.mockReturnValue({ value: "invalid" });
+      await setupValidSession("user-123");
+      mockGetUser.mockResolvedValue(null);
 
       const result = await getAuthenticatedUser();
 
       expect(result).toBeNull();
+      expect(mockGetUser).toHaveBeenCalledWith("user-123");
     });
 
     it("should return null when user has no tokens", async () => {
-      mockGet.mockReturnValue(undefined);
+      await setupValidSession("user-123");
       mockGetUser.mockResolvedValue({
         id: "user-123",
         access_token: null,
         refresh_token: null,
+        token_expires_at: null,
       });
 
       const result = await getAuthenticatedUser();
 
-      // Session cookie is null, so returns null before DB check
       expect(result).toBeNull();
+      expect(mockGetUser).toHaveBeenCalledWith("user-123");
     });
 
     it("should refresh token when expired", async () => {
-      // This test requires valid encrypted session - skip direct test
-      // Integration test would be better for this flow
-      mockGet.mockReturnValue(undefined);
+      await setupValidSession("user-123");
+
+      const expiredTime = Math.floor(Date.now() / 1000) - 60;
+      mockGetUser.mockResolvedValue({
+        id: "user-123",
+        access_token: "old-access-token",
+        refresh_token: "my-refresh-token",
+        token_expires_at: expiredTime,
+      });
+      mockRefreshAccessToken.mockResolvedValue({
+        access_token: "new-access-token",
+        refresh_token: "new-refresh-token",
+        expires_in: 3600,
+      });
+      mockUpdateUserTokens.mockResolvedValue(undefined);
+
+      const result = await getAuthenticatedUser();
+
+      expect(result).toEqual({
+        userId: "user-123",
+        accessToken: "new-access-token",
+      });
+      expect(mockRefreshAccessToken).toHaveBeenCalledWith("my-refresh-token");
+      expect(mockUpdateUserTokens).toHaveBeenCalledWith(
+        "user-123",
+        "new-access-token",
+        "new-refresh-token",
+        expect.any(Number)
+      );
+    });
+
+    it("should return null when token refresh fails", async () => {
+      await setupValidSession("user-123");
+
+      const expiredTime = Math.floor(Date.now() / 1000) - 60;
+      mockGetUser.mockResolvedValue({
+        id: "user-123",
+        access_token: "old-access-token",
+        refresh_token: "my-refresh-token",
+        token_expires_at: expiredTime,
+      });
+      mockRefreshAccessToken.mockRejectedValue(new Error("Refresh failed"));
 
       const result = await getAuthenticatedUser();
 
       expect(result).toBeNull();
+      expect(mockRefreshAccessToken).toHaveBeenCalledWith("my-refresh-token");
+    });
+
+    it("should return user without refresh when token is still valid", async () => {
+      await setupValidSession("user-123");
+
+      const futureTime = Math.floor(Date.now() / 1000) + 3600;
+      mockGetUser.mockResolvedValue({
+        id: "user-123",
+        access_token: "valid-access-token",
+        refresh_token: "my-refresh-token",
+        token_expires_at: futureTime,
+      });
+
+      const result = await getAuthenticatedUser();
+
+      expect(result).toEqual({
+        userId: "user-123",
+        accessToken: "valid-access-token",
+      });
+      expect(mockRefreshAccessToken).not.toHaveBeenCalled();
     });
   });
 });
