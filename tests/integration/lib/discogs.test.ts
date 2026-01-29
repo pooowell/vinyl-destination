@@ -167,7 +167,7 @@ describe("Discogs API Integration (MSW)", () => {
 
       await searchVinylRelease("Header Test Artist", "Header Test Album");
 
-      expect(capturedHeaders?.get("Authorization")).toContain("Discogs token=");
+      expect(capturedHeaders!.get("Authorization")).toContain("Discogs token=");
     });
 
     it("should include user agent header", async () => {
@@ -185,7 +185,7 @@ describe("Discogs API Integration (MSW)", () => {
 
       await searchVinylRelease("UA Test Artist", "UA Test Album");
 
-      expect(capturedHeaders?.get("User-Agent")).toBe("SpotifyVinylSearch/1.0");
+      expect(capturedHeaders!.get("User-Agent")).toBe("SpotifyVinylSearch/1.0");
     });
   });
 
