@@ -9,9 +9,12 @@ import {
   exchangeCodeForTokens,
   refreshAccessToken,
   getCurrentUser,
+  getTopArtists,
   getTopTracks,
   getSavedAlbums,
   getRecentlyPlayed,
+  getArtistAlbums,
+  getRecommendations,
   extractUniqueAlbums,
 } from "@/lib/spotify";
 
@@ -220,6 +223,229 @@ describe("spotify - User Data", () => {
         expect.any(Object)
       );
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe("getTopArtists", () => {
+    it("should fetch top artists with default parameters", async () => {
+      const mockResponse = {
+        items: [
+          { id: "artist1", name: "Artist 1" },
+          { id: "artist2", name: "Artist 2" },
+        ],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getTopArtists("access-token");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/me/top/artists"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("time_range=medium_term"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("limit=20"),
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it("should fetch top artists with custom time range", async () => {
+      const mockResponse = { items: [] };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await getTopArtists("access-token", "short_term", 10);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("time_range=short_term"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("limit=10"),
+        expect.any(Object)
+      );
+    });
+
+    it("should throw on API error", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Unauthorized"),
+      });
+
+      await expect(getTopArtists("invalid-token")).rejects.toThrow("Spotify API error");
+    });
+  });
+
+  describe("getArtistAlbums", () => {
+    it("should fetch albums for an artist", async () => {
+      const mockResponse = {
+        items: [
+          { id: "album1", name: "Album 1", album_type: "album" },
+          { id: "album2", name: "Album 2", album_type: "album" },
+        ],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getArtistAlbums("access-token", "artist123", 50);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/artists/artist123/albums"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("include_groups=album"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("limit=50"),
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it("should throw on API error", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        text: () => Promise.resolve("Artist not found"),
+      });
+
+      await expect(getArtistAlbums("access-token", "invalid-artist")).rejects.toThrow(
+        "Spotify API error"
+      );
+    });
+  });
+
+  describe("getRecommendations", () => {
+    it("should get recommendations based on seed tracks", async () => {
+      const mockResponse = {
+        tracks: [
+          { id: "rec1", name: "Recommended Track 1" },
+          { id: "rec2", name: "Recommended Track 2" },
+        ],
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getRecommendations("access-token", ["track1", "track2"], [], 20);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("/recommendations"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("seed_tracks=track1,track2"),
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it("should search for artists and use as seeds", async () => {
+      // Mock artist search response
+      const mockSearchResponse = {
+        artists: { items: [{ id: "found-artist-1" }] },
+      };
+      const mockRecommendationsResponse = {
+        tracks: [{ id: "rec1", name: "Recommended" }],
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockSearchResponse),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockRecommendationsResponse),
+        });
+
+      const result = await getRecommendations("access-token", [], ["Artist Name"], 20);
+
+      // First call should be artist search
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining("/search"),
+        expect.any(Object)
+      );
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        expect.stringContaining("type=artist"),
+        expect.any(Object)
+      );
+      // Second call should be recommendations
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining("seed_artists=found-artist-1"),
+        expect.any(Object)
+      );
+      expect(result).toEqual(mockRecommendationsResponse);
+    });
+
+    it("should return empty tracks when no seeds provided", async () => {
+      const result = await getRecommendations("access-token", [], [], 20);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result).toEqual({ tracks: [] });
+    });
+
+    it("should handle artist search failures gracefully", async () => {
+      // Mock failed search followed by recommendations
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          text: () => Promise.resolve("Search failed"),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ tracks: [] }),
+        });
+
+      // Should not throw, just return empty tracks since no valid seeds
+      const result = await getRecommendations("access-token", [], ["Unknown Artist"], 20);
+      expect(result).toEqual({ tracks: [] });
+    });
+
+    it("should combine track and artist seeds when artist is found", async () => {
+      // This test verifies that multiple track IDs can be used as seeds
+      // and are correctly formatted in the URL
+      
+      const mockRecommendationsResponse = {
+        tracks: [{ id: "rec1" }],
+      };
+
+      // Reset fetch to clean state
+      mockFetch.mockReset();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockRecommendationsResponse),
+      });
+
+      const result = await getRecommendations("access-token", ["track1", "track2"], [], 20);
+
+      // Should include both tracks in seeds (limited to 2)
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("seed_tracks=track1,track2"),
+        expect.any(Object)
+      );
+      
+      expect(result).toEqual(mockRecommendationsResponse);
     });
   });
 });

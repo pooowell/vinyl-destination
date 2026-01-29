@@ -23,6 +23,7 @@ import {
   removeAlbumStatus,
   getCachedVinylStatus,
   setCachedVinylStatus,
+  getBulkCachedVinylStatus,
 } from "@/lib/db";
 
 describe("db - User Operations", () => {
@@ -219,6 +220,96 @@ describe("db - Album Operations", () => {
 
       expect(result).toEqual(["album1", "album2"]);
     });
+
+    it("should return empty array when no albums", async () => {
+      const mockEq = vi.fn().mockResolvedValue({ data: null, error: null });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const result = await getAllUserAlbumIds("user123");
+
+      expect(result).toEqual([]);
+    });
+
+    it("should throw on database error", async () => {
+      const mockError = { message: "Database error" };
+      const mockEq = vi.fn().mockResolvedValue({ data: null, error: mockError });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      await expect(getAllUserAlbumIds("user123")).rejects.toEqual(mockError);
+    });
+  });
+
+  describe("getActiveUserAlbumIds", () => {
+    it("should return active album IDs excluding expired skips", async () => {
+      const now = Math.floor(Date.now() / 1000);
+      const mockData = [
+        { album_id: "owned1", status: "owned", created_at: now - 1000 },
+        { album_id: "wishlist1", status: "wishlist", created_at: now - 2000 },
+        { album_id: "skipped_recent", status: "skipped", created_at: now - 3600 }, // 1 hour ago - active
+        { album_id: "skipped_old", status: "skipped", created_at: now - 200000 }, // expired (>48h)
+      ];
+
+      const mockEq = vi.fn().mockResolvedValue({ data: mockData, error: null });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const result = await getActiveUserAlbumIds("user123");
+
+      expect(result).toContain("owned1");
+      expect(result).toContain("wishlist1");
+      expect(result).toContain("skipped_recent");
+      expect(result).not.toContain("skipped_old");
+    });
+
+    it("should return empty array when no albums", async () => {
+      const mockEq = vi.fn().mockResolvedValue({ data: null, error: null });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const result = await getActiveUserAlbumIds("user123");
+
+      expect(result).toEqual([]);
+    });
+
+    it("should throw on database error", async () => {
+      const mockError = { message: "Database error" };
+      const mockEq = vi.fn().mockResolvedValue({ data: null, error: mockError });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEq });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      await expect(getActiveUserAlbumIds("user123")).rejects.toEqual(mockError);
+    });
+  });
+
+  describe("cleanupExpiredSkips", () => {
+    it("should delete expired skipped albums", async () => {
+      const mockLte = vi.fn().mockResolvedValue({ error: null });
+      const mockEqStatus = vi.fn().mockReturnValue({ lte: mockLte });
+      const mockEqUser = vi.fn().mockReturnValue({ eq: mockEqStatus });
+      const mockDelete = vi.fn().mockReturnValue({ eq: mockEqUser });
+      mockFrom.mockReturnValue({ delete: mockDelete });
+
+      await cleanupExpiredSkips("user123");
+
+      expect(mockFrom).toHaveBeenCalledWith("user_albums");
+      expect(mockDelete).toHaveBeenCalled();
+      expect(mockEqUser).toHaveBeenCalledWith("user_id", "user123");
+      expect(mockEqStatus).toHaveBeenCalledWith("status", "skipped");
+      expect(mockLte).toHaveBeenCalledWith("created_at", expect.any(Number));
+    });
+
+    it("should throw on database error", async () => {
+      const mockError = { message: "Cleanup failed" };
+      const mockLte = vi.fn().mockResolvedValue({ error: mockError });
+      const mockEqStatus = vi.fn().mockReturnValue({ lte: mockLte });
+      const mockEqUser = vi.fn().mockReturnValue({ eq: mockEqStatus });
+      const mockDelete = vi.fn().mockReturnValue({ eq: mockEqUser });
+      mockFrom.mockReturnValue({ delete: mockDelete });
+
+      await expect(cleanupExpiredSkips("user123")).rejects.toEqual(mockError);
+    });
   });
 
   describe("removeAlbumStatus", () => {
@@ -306,6 +397,130 @@ describe("db - Vinyl Cache Operations", () => {
         }),
         { onConflict: "artist_name,album_name" }
       );
+    });
+
+    it("should handle null discogs URL", async () => {
+      const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+      mockFrom.mockReturnValue({ upsert: mockUpsert });
+
+      await setCachedVinylStatus("Artist", "Album", false);
+
+      expect(mockUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          has_vinyl: false,
+          discogs_url: null,
+        }),
+        expect.any(Object)
+      );
+    });
+
+    it("should throw on database error", async () => {
+      const mockError = { message: "Cache write failed" };
+      const mockUpsert = vi.fn().mockResolvedValue({ error: mockError });
+      mockFrom.mockReturnValue({ upsert: mockUpsert });
+
+      await expect(
+        setCachedVinylStatus("Artist", "Album", true)
+      ).rejects.toEqual(mockError);
+    });
+  });
+
+  describe("getBulkCachedVinylStatus", () => {
+    it("should return cached status for multiple albums", async () => {
+      const mockData1 = {
+        has_vinyl: true,
+        discogs_url: "https://discogs.com/1",
+      };
+      const mockData2 = {
+        has_vinyl: false,
+        discogs_url: null,
+      };
+
+      // Mock the chained calls for each album query
+      const createMockChain = (data: unknown, hasError: boolean) => {
+        const mockSingle = vi.fn().mockResolvedValue({
+          data: hasError ? null : data,
+          error: hasError ? { code: "PGRST116" } : null,
+        });
+        const mockGt = vi.fn().mockReturnValue({ single: mockSingle });
+        const mockEqAlbum = vi.fn().mockReturnValue({ gt: mockGt });
+        const mockEqArtist = vi.fn().mockReturnValue({ eq: mockEqAlbum });
+        const mockSelect = vi.fn().mockReturnValue({ eq: mockEqArtist });
+        return { select: mockSelect };
+      };
+
+      // First call returns data, second call returns data
+      mockFrom
+        .mockReturnValueOnce(createMockChain(mockData1, false))
+        .mockReturnValueOnce(createMockChain(mockData2, false));
+
+      const albums = [
+        { artist: "Artist1", album: "Album1" },
+        { artist: "Artist2", album: "Album2" },
+      ];
+
+      const result = await getBulkCachedVinylStatus(albums);
+
+      expect(result.size).toBe(2);
+      expect(result.get("artist1|album1")).toEqual({
+        hasVinyl: true,
+        discogsUrl: "https://discogs.com/1",
+      });
+      expect(result.get("artist2|album2")).toEqual({
+        hasVinyl: false,
+        discogsUrl: null,
+      });
+    });
+
+    it("should handle missing cache entries", async () => {
+      const createMockChain = () => {
+        const mockSingle = vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: "PGRST116" },
+        });
+        const mockGt = vi.fn().mockReturnValue({ single: mockSingle });
+        const mockEqAlbum = vi.fn().mockReturnValue({ gt: mockGt });
+        const mockEqArtist = vi.fn().mockReturnValue({ eq: mockEqAlbum });
+        const mockSelect = vi.fn().mockReturnValue({ eq: mockEqArtist });
+        return { select: mockSelect };
+      };
+
+      mockFrom.mockReturnValue(createMockChain());
+
+      const albums = [{ artist: "Unknown", album: "Unknown" }];
+
+      const result = await getBulkCachedVinylStatus(albums);
+
+      expect(result.size).toBe(0);
+    });
+
+    it("should handle empty album list", async () => {
+      const result = await getBulkCachedVinylStatus([]);
+
+      expect(result.size).toBe(0);
+      expect(mockFrom).not.toHaveBeenCalled();
+    });
+
+    it("should normalize artist and album names to lowercase", async () => {
+      const mockData = {
+        has_vinyl: true,
+        discogs_url: "https://discogs.com/test",
+      };
+
+      const mockSingle = vi.fn().mockResolvedValue({ data: mockData, error: null });
+      const mockGt = vi.fn().mockReturnValue({ single: mockSingle });
+      const mockEqAlbum = vi.fn().mockReturnValue({ gt: mockGt });
+      const mockEqArtist = vi.fn().mockReturnValue({ eq: mockEqAlbum });
+      const mockSelect = vi.fn().mockReturnValue({ eq: mockEqArtist });
+      mockFrom.mockReturnValue({ select: mockSelect });
+
+      const albums = [{ artist: "UPPER CASE", album: "MixedCase" }];
+
+      const result = await getBulkCachedVinylStatus(albums);
+
+      expect(mockEqArtist).toHaveBeenCalledWith("artist_name", "upper case");
+      expect(mockEqAlbum).toHaveBeenCalledWith("album_name", "mixedcase");
+      expect(result.has("upper case|mixedcase")).toBe(true);
     });
   });
 });

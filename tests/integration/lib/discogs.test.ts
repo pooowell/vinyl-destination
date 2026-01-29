@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({
 import {
   searchVinylRelease,
   checkVinylAvailability,
+  getMostCollectedVinyl,
 } from "@/lib/discogs";
 
 describe("Discogs API Integration (MSW)", () => {
@@ -185,6 +186,72 @@ describe("Discogs API Integration (MSW)", () => {
       await searchVinylRelease("UA Test Artist", "UA Test Album");
 
       expect(capturedHeaders?.get("User-Agent")).toBe("SpotifyVinylSearch/1.0");
+    });
+  });
+
+  describe("getMostCollectedVinyl", () => {
+    it("should fetch most collected vinyl releases", async () => {
+      // Use unique genre to avoid in-memory cache from previous tests
+      const results = await getMostCollectedVinyl("IntegrationTestGenre1", 20);
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].format).toContain("Vinyl");
+    });
+
+    it("should filter by genre when provided", async () => {
+      // Use unique genre to avoid cache
+      const results = await getMostCollectedVinyl("IntegrationTestRock", 20);
+
+      expect(results.length).toBeGreaterThan(0);
+      // Verify genre was included in request (results include genre in title per our handler)
+      expect(results[results.length - 1].title).toContain("IntegrationTestRock");
+    });
+
+    it("should return empty array on API error", async () => {
+      server.use(
+        http.get("https://api.discogs.com/database/search", ({ request }) => {
+          const url = new URL(request.url);
+          // Only intercept requests with our unique test genre
+          if (url.searchParams.get("genre") === "ErrorTestGenre") {
+            return HttpResponse.json(
+              { message: "Server Error" },
+              { status: 500 }
+            );
+          }
+          // Let other requests pass through to default handler
+          return HttpResponse.json({
+            pagination: { page: 1, pages: 1, per_page: 20, items: 0 },
+            results: [],
+          });
+        })
+      );
+
+      const results = await getMostCollectedVinyl("ErrorTestGenre", 20);
+
+      expect(results).toEqual([]);
+    });
+
+    it("should handle rate limiting gracefully", async () => {
+      server.use(
+        http.get("https://api.discogs.com/database/search", ({ request }) => {
+          const url = new URL(request.url);
+          // Only intercept requests with our unique test genre
+          if (url.searchParams.get("genre") === "RateLimitTestGenre") {
+            return HttpResponse.json(
+              { message: "Rate limit exceeded" },
+              { status: 429 }
+            );
+          }
+          return HttpResponse.json({
+            pagination: { page: 1, pages: 1, per_page: 20, items: 0 },
+            results: [],
+          });
+        })
+      );
+
+      const results = await getMostCollectedVinyl("RateLimitTestGenre", 10);
+
+      expect(results).toEqual([]);
     });
   });
 });
