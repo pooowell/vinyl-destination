@@ -227,23 +227,25 @@ export function getBulkCachedVinylStatus(
 
   const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
   const db = getDatabase();
-  const stmt = db.prepare(
-    "SELECT * FROM vinyl_cache WHERE artist_name = ? AND album_name = ? AND checked_at > ?"
-  );
 
-  for (const { artist, album } of albums) {
-    const artistLower = artist.toLowerCase();
-    const albumLower = album.toLowerCase();
-    const row = stmt.get(artistLower, albumLower, expiryTime) as
-      | VinylCacheEntry
-      | undefined;
+  // Build single query with OR conditions instead of N individual queries
+  const conditions = albums
+    .map(() => "(artist_name = ? AND album_name = ?)")
+    .join(" OR ");
+  const params: (string | number)[] = albums.flatMap((a) => [
+    a.artist.toLowerCase(),
+    a.album.toLowerCase(),
+  ]);
+  params.push(expiryTime);
 
-    if (row) {
-      results.set(`${artistLower}|${albumLower}`, {
-        hasVinyl: row.has_vinyl === 1,
-        discogsUrl: row.discogs_url,
-      });
-    }
+  const query = `SELECT * FROM vinyl_cache WHERE (${conditions}) AND checked_at > ?`;
+  const rows = db.prepare(query).all(...params) as VinylCacheEntry[];
+
+  for (const row of rows) {
+    results.set(`${row.artist_name}|${row.album_name}`, {
+      hasVinyl: row.has_vinyl === 1,
+      discogsUrl: row.discogs_url,
+    });
   }
 
   return results;

@@ -456,5 +456,36 @@ describe("db - Vinyl Cache Operations", () => {
 
       expect(result.has("upper case|mixedcase")).toBe(true);
     });
+
+    it("should exclude expired entries from batch results", () => {
+      const now = Math.floor(Date.now() / 1000);
+      const eightDaysAgo = now - 8 * 24 * 60 * 60;
+
+      seedVinylCache(db, {
+        artist_name: "fresh artist",
+        album_name: "fresh album",
+        has_vinyl: true,
+        discogs_url: "https://discogs.com/fresh",
+        checked_at: now,
+      });
+      seedVinylCache(db, {
+        artist_name: "stale artist",
+        album_name: "stale album",
+        has_vinyl: true,
+        discogs_url: "https://discogs.com/stale",
+        checked_at: eightDaysAgo,
+      });
+
+      const albums = [
+        { artist: "Fresh Artist", album: "Fresh Album" },
+        { artist: "Stale Artist", album: "Stale Album" },
+      ];
+
+      const result = getBulkCachedVinylStatus(albums);
+
+      expect(result.size).toBe(1);
+      expect(result.has("fresh artist|fresh album")).toBe(true);
+      expect(result.has("stale artist|stale album")).toBe(false);
+    });
   });
 });
