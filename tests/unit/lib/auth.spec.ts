@@ -62,7 +62,7 @@ describe("auth - State Management", () => {
 
       expect(mockSet).toHaveBeenCalledWith("oauth_state", "test-state-123", {
         httpOnly: true,
-        secure: false,
+        secure: expect.any(Boolean),
         sameSite: "lax",
         maxAge: 600, // 10 minutes
         path: "/",
@@ -198,6 +198,42 @@ describe("auth - Authenticated User", () => {
 
       expect(result).toBeNull();
     });
+  });
+});
+
+describe("auth - Cookie Secure Flag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should set state cookie secure=false when NODE_ENV is not production", async () => {
+    // setup.unit.ts does not set NODE_ENV to production, so IS_PRODUCTION is false
+    await setStateCookie("state-dev");
+
+    expect(mockSet).toHaveBeenCalledWith(
+      "oauth_state",
+      "state-dev",
+      expect.objectContaining({ secure: false })
+    );
+  });
+
+  it("should set session cookie secure=false when NODE_ENV is not production", async () => {
+    await setSessionCookie("user-dev");
+
+    expect(mockSet).toHaveBeenCalledWith(
+      "spotify_session",
+      expect.any(String),
+      expect.objectContaining({ secure: false })
+    );
+  });
+
+  it("should use the same secure value for both state and session cookies", async () => {
+    await setStateCookie("state-consistency");
+    await setSessionCookie("user-consistency");
+
+    const stateSecure = mockSet.mock.calls[0][2].secure;
+    const sessionSecure = mockSet.mock.calls[1][2].secure;
+    expect(stateSecure).toBe(sessionSecure);
   });
 });
 
