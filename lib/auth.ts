@@ -5,6 +5,7 @@ import crypto from "crypto";
 
 const SESSION_COOKIE = "spotify_session";
 const STATE_COOKIE = "oauth_state";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 // Simple encryption for session data
 function encrypt(text: string): string {
@@ -36,7 +37,7 @@ export async function setStateCookie(state: string): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set(STATE_COOKIE, state, {
     httpOnly: true,
-    secure: false,
+    secure: IS_PRODUCTION,
     sameSite: "lax",
     maxAge: 60 * 10, // 10 minutes
     path: "/",
@@ -58,7 +59,7 @@ export async function setSessionCookie(userId: string): Promise<void> {
   const encrypted = encrypt(userId);
   cookieStore.set(SESSION_COOKIE, encrypted, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: IS_PRODUCTION,
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 7, // 1 week
     path: "/",
