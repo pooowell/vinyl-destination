@@ -1,4 +1,4 @@
-import { getSupabase } from "./supabase";
+import { getDatabase } from "./database";
 
 // User operations
 export interface User {
@@ -11,71 +11,54 @@ export interface User {
   created_at: number;
 }
 
-export async function upsertUser(user: {
+export function upsertUser(user: {
   id: string;
   display_name?: string;
   email?: string;
   access_token: string;
   refresh_token: string;
   token_expires_at: number;
-}): Promise<void> {
-  const supabase = await getSupabase();
-  const { error } = await supabase
-    .from("users")
-    .upsert({
-      id: user.id,
-      display_name: user.display_name || null,
-      email: user.email || null,
-      access_token: user.access_token,
-      refresh_token: user.refresh_token,
-      token_expires_at: user.token_expires_at,
-    });
-
-  if (error) {
-    console.error("Error upserting user:", error);
-    throw error;
-  }
+}): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT INTO users (id, display_name, email, access_token, refresh_token, token_expires_at)
+    VALUES (@id, @display_name, @email, @access_token, @refresh_token, @token_expires_at)
+    ON CONFLICT(id) DO UPDATE SET
+      display_name = @display_name,
+      email = @email,
+      access_token = @access_token,
+      refresh_token = @refresh_token,
+      token_expires_at = @token_expires_at
+  `);
+  stmt.run({
+    id: user.id,
+    display_name: user.display_name || null,
+    email: user.email || null,
+    access_token: user.access_token,
+    refresh_token: user.refresh_token,
+    token_expires_at: user.token_expires_at,
+  });
 }
 
-export async function getUser(id: string): Promise<User | undefined> {
-  const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", id)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") {
-      return undefined;
-    }
-    console.error("Error getting user:", error);
-    throw error;
-  }
-
-  return data as User;
+export function getUser(id: string): User | undefined {
+  const db = getDatabase();
+  const stmt = db.prepare("SELECT * FROM users WHERE id = ?");
+  return stmt.get(id) as User | undefined;
 }
 
-export async function updateUserTokens(
+export function updateUserTokens(
   id: string,
   accessToken: string,
   refreshToken: string,
   expiresAt: number
-): Promise<void> {
-  const supabase = await getSupabase();
-  const { error } = await supabase
-    .from("users")
-    .update({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      token_expires_at: expiresAt,
-    })
-    .eq("id", id);
-
-  if (error) {
-    console.error("Error updating user tokens:", error);
-    throw error;
-  }
+): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    UPDATE users
+    SET access_token = ?, refresh_token = ?, token_expires_at = ?
+    WHERE id = ?
+  `);
+  stmt.run(accessToken, refreshToken, expiresAt, id);
 }
 
 // Album operations
@@ -94,7 +77,7 @@ export interface UserAlbum {
   created_at: number;
 }
 
-export async function setAlbumStatus(
+export function setAlbumStatus(
   userId: string,
   album: {
     album_id: string;
@@ -103,117 +86,74 @@ export async function setAlbumStatus(
     image_url: string;
   },
   status: AlbumStatus
-): Promise<void> {
-  const supabase = await getSupabase();
-  const { error } = await supabase
-    .from("user_albums")
-    .upsert(
-      {
-        user_id: userId,
-        album_id: album.album_id,
-        album_name: album.album_name,
-        artist_name: album.artist_name,
-        image_url: album.image_url,
-        status,
-        created_at: Math.floor(Date.now() / 1000),
-      },
-      {
-        onConflict: "user_id,album_id",
-      }
-    );
-
-  if (error) {
-    console.error("Error setting album status:", error);
-    throw error;
-  }
+): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT INTO user_albums (user_id, album_id, album_name, artist_name, image_url, status, created_at)
+    VALUES (@user_id, @album_id, @album_name, @artist_name, @image_url, @status, @created_at)
+    ON CONFLICT(user_id, album_id) DO UPDATE SET
+      album_name = @album_name,
+      artist_name = @artist_name,
+      image_url = @image_url,
+      status = @status,
+      created_at = @created_at
+  `);
+  stmt.run({
+    user_id: userId,
+    album_id: album.album_id,
+    album_name: album.album_name,
+    artist_name: album.artist_name,
+    image_url: album.image_url,
+    status,
+    created_at: Math.floor(Date.now() / 1000),
+  });
 }
 
-export async function getUserAlbumsByStatus(
+export function getUserAlbumsByStatus(
   userId: string,
   status: AlbumStatus
-): Promise<UserAlbum[]> {
-  const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .from("user_albums")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("status", status)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Error getting user albums by status:", error);
-    throw error;
-  }
-
-  return (data as UserAlbum[]) || [];
+): UserAlbum[] {
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "SELECT * FROM user_albums WHERE user_id = ? AND status = ? ORDER BY created_at DESC"
+  );
+  return stmt.all(userId, status) as UserAlbum[];
 }
 
-export async function getAllUserAlbumIds(userId: string): Promise<string[]> {
-  const supabase = await getSupabase();
-  const { data, error } = await supabase
-    .from("user_albums")
-    .select("album_id")
-    .eq("user_id", userId);
-
-  if (error) {
-    console.error("Error getting all user album IDs:", error);
-    throw error;
-  }
-
-  return (data || []).map((r) => r.album_id);
+export function getAllUserAlbumIds(userId: string): string[] {
+  const db = getDatabase();
+  const stmt = db.prepare("SELECT album_id FROM user_albums WHERE user_id = ?");
+  const rows = stmt.all(userId) as { album_id: string }[];
+  return rows.map((r) => r.album_id);
 }
 
-export async function getActiveUserAlbumIds(userId: string): Promise<string[]> {
+export function getActiveUserAlbumIds(userId: string): string[] {
   const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
-  const supabase = await getSupabase();
-
-  const { data, error } = await supabase
-    .from("user_albums")
-    .select("album_id, status, created_at")
-    .eq("user_id", userId);
-
-  if (error) {
-    console.error("Error getting active user album IDs:", error);
-    throw error;
-  }
-
-  return (data || [])
-    .filter((row) => row.status !== "skipped" || row.created_at > expiryTime)
-    .map((r) => r.album_id);
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    SELECT album_id FROM user_albums
+    WHERE user_id = ?
+      AND (status != 'skipped' OR created_at > ?)
+  `);
+  const rows = stmt.all(userId, expiryTime) as { album_id: string }[];
+  return rows.map((r) => r.album_id);
 }
 
-export async function cleanupExpiredSkips(userId: string): Promise<void> {
+export function cleanupExpiredSkips(userId: string): void {
   const expiryTime = Math.floor(Date.now() / 1000) - SKIP_EXPIRY_SECONDS;
-  const supabase = await getSupabase();
-
-  const { error } = await supabase
-    .from("user_albums")
-    .delete()
-    .eq("user_id", userId)
-    .eq("status", "skipped")
-    .lte("created_at", expiryTime);
-
-  if (error) {
-    console.error("Error cleaning up expired skips:", error);
-    throw error;
-  }
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "DELETE FROM user_albums WHERE user_id = ? AND status = 'skipped' AND created_at <= ?"
+  );
+  stmt.run(userId, expiryTime);
 }
 
-export async function removeAlbumStatus(
-  userId: string,
-  albumId: string
-): Promise<void> {
-  const supabase = await getSupabase();
-  const { error } = await supabase
-    .from("user_albums")
-    .delete()
-    .eq("user_id", userId)
-    .eq("album_id", albumId);
-
-  if (error) {
-    console.error("Error removing album status:", error);
-    throw error;
-  }
+export function removeAlbumStatus(userId: string, albumId: string): void {
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "DELETE FROM user_albums WHERE user_id = ? AND album_id = ?"
+  );
+  stmt.run(userId, albumId);
 }
 
 // Vinyl cache operations
@@ -223,111 +163,85 @@ export interface VinylCacheEntry {
   id: number;
   artist_name: string;
   album_name: string;
-  has_vinyl: boolean;
+  has_vinyl: number;
   discogs_url: string | null;
   checked_at: number;
 }
 
-export async function getCachedVinylStatus(
+export function getCachedVinylStatus(
   artistName: string,
   albumName: string
-): Promise<{ hasVinyl: boolean; discogsUrl: string | null } | null> {
+): { hasVinyl: boolean; discogsUrl: string | null } | null {
   const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
-  const supabase = await getSupabase();
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "SELECT * FROM vinyl_cache WHERE artist_name = ? AND album_name = ? AND checked_at > ?"
+  );
+  const row = stmt.get(
+    artistName.toLowerCase(),
+    albumName.toLowerCase(),
+    expiryTime
+  ) as VinylCacheEntry | undefined;
 
-  const { data, error } = await supabase
-    .from("vinyl_cache")
-    .select("*")
-    .eq("artist_name", artistName.toLowerCase())
-    .eq("album_name", albumName.toLowerCase())
-    .gt("checked_at", expiryTime)
-    .single();
-
-  if (error) {
-    if (error.code === "PGRST116") {
-      return null;
-    }
-    console.error("Error getting cached vinyl status:", error);
-    throw error;
-  }
+  if (!row) return null;
 
   return {
-    hasVinyl: data.has_vinyl,
-    discogsUrl: data.discogs_url,
+    hasVinyl: row.has_vinyl === 1,
+    discogsUrl: row.discogs_url,
   };
 }
 
-export async function setCachedVinylStatus(
+export function setCachedVinylStatus(
   artistName: string,
   albumName: string,
   hasVinyl: boolean,
   discogsUrl?: string
-): Promise<void> {
-  const supabase = await getSupabase();
-  const { error } = await supabase
-    .from("vinyl_cache")
-    .upsert(
-      {
-        artist_name: artistName.toLowerCase(),
-        album_name: albumName.toLowerCase(),
-        has_vinyl: hasVinyl,
-        discogs_url: discogsUrl || null,
-        checked_at: Math.floor(Date.now() / 1000),
-      },
-      {
-        onConflict: "artist_name,album_name",
-      }
-    );
-
-  if (error) {
-    console.error("Error setting cached vinyl status:", error);
-    throw error;
-  }
+): void {
+  const db = getDatabase();
+  const stmt = db.prepare(`
+    INSERT INTO vinyl_cache (artist_name, album_name, has_vinyl, discogs_url, checked_at)
+    VALUES (@artist_name, @album_name, @has_vinyl, @discogs_url, @checked_at)
+    ON CONFLICT(artist_name, album_name) DO UPDATE SET
+      has_vinyl = @has_vinyl,
+      discogs_url = @discogs_url,
+      checked_at = @checked_at
+  `);
+  stmt.run({
+    artist_name: artistName.toLowerCase(),
+    album_name: albumName.toLowerCase(),
+    has_vinyl: hasVinyl ? 1 : 0,
+    discogs_url: discogsUrl || null,
+    checked_at: Math.floor(Date.now() / 1000),
+  });
 }
 
-export async function getBulkCachedVinylStatus(
+export function getBulkCachedVinylStatus(
   albums: { artist: string; album: string }[]
-): Promise<Map<string, { hasVinyl: boolean; discogsUrl: string | null }>> {
-  const results = new Map<string, { hasVinyl: boolean; discogsUrl: string | null }>();
+): Map<string, { hasVinyl: boolean; discogsUrl: string | null }> {
+  const results = new Map<
+    string,
+    { hasVinyl: boolean; discogsUrl: string | null }
+  >();
+
+  if (albums.length === 0) return results;
+
   const expiryTime = Math.floor(Date.now() / 1000) - CACHE_TTL_SECONDS;
-  const supabase = await getSupabase();
+  const db = getDatabase();
+  const stmt = db.prepare(
+    "SELECT * FROM vinyl_cache WHERE artist_name = ? AND album_name = ? AND checked_at > ?"
+  );
 
-  const queries = albums.map((a) => ({
-    artist: a.artist.toLowerCase(),
-    album: a.album.toLowerCase(),
-  }));
+  for (const { artist, album } of albums) {
+    const artistLower = artist.toLowerCase();
+    const albumLower = album.toLowerCase();
+    const row = stmt.get(artistLower, albumLower, expiryTime) as
+      | VinylCacheEntry
+      | undefined;
 
-  const promises = queries.map(async ({ artist, album }) => {
-    const { data, error } = await supabase
-      .from("vinyl_cache")
-      .select("*")
-      .eq("artist_name", artist)
-      .eq("album_name", album)
-      .gt("checked_at", expiryTime)
-      .single();
-
-    if (error) {
-      if (error.code === "PGRST116") {
-        return null;
-      }
-      console.error("Error in bulk vinyl status query:", error);
-      return null;
-    }
-
-    return {
-      key: `${artist}|${album}`,
-      hasVinyl: data.has_vinyl,
-      discogsUrl: data.discogs_url,
-    };
-  });
-
-  const resultsArray = await Promise.all(promises);
-
-  for (const result of resultsArray) {
-    if (result) {
-      results.set(result.key, {
-        hasVinyl: result.hasVinyl,
-        discogsUrl: result.discogsUrl,
+    if (row) {
+      results.set(`${artistLower}|${albumLower}`, {
+        hasVinyl: row.has_vinyl === 1,
+        discogsUrl: row.discogs_url,
       });
     }
   }
