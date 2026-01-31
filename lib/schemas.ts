@@ -17,7 +17,7 @@ export type AlbumStatus = z.infer<typeof albumStatusEnum>;
  */
 export const collectionPostSchema = z.object({
   albumId: z
-    .string({ required_error: "albumId is required" })
+    .string({ message: "albumId is required" })
     .trim()
     .min(1, "albumId must not be empty"),
   albumName: z.string().trim().optional(),
@@ -38,7 +38,7 @@ export type CollectionPostInput = z.infer<typeof collectionPostSchema>;
  */
 export const collectionDeleteSchema = z.object({
   albumId: z
-    .string({ required_error: "albumId is required" })
+    .string({ message: "albumId is required" })
     .trim()
     .min(1, "albumId must not be empty"),
 });
