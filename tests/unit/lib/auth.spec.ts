@@ -392,7 +392,7 @@ describe("auth - getAuthenticatedUser", () => {
 
     const result = await getAuthenticatedUser();
 
-    // null < (now + 300) is false in JS, so no refresh triggered
+    // token_expires_at is null, so the guard short-circuits and no refresh is triggered
     expect(result).toEqual({
       userId: "user-null-expiry",
       accessToken: "access-ok",
