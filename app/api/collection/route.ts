@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
 import { getAuthenticatedUser } from "@/lib/auth";
 import {
   setAlbumStatus,
   getUserAlbumsByStatus,
   removeAlbumStatus,
 } from "@/lib/db";
+import { collectionPostSchema, collectionDeleteSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -71,32 +73,27 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { albumId, albumName, artistName, imageUrl, status } = body;
-
-    if (!albumId || !status) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-
-    if (status !== "owned" && status !== "wishlist" && status !== "skipped" && status !== "not_interested") {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-    }
+    const parsed = collectionPostSchema.parse(body);
 
     await setAlbumStatus(
       auth.userId,
       {
-        album_id: albumId,
-        album_name: albumName || "",
-        artist_name: artistName || "",
-        image_url: imageUrl || "",
+        album_id: parsed.albumId,
+        album_name: parsed.albumName ?? "",
+        artist_name: parsed.artistName ?? "",
+        image_url: parsed.imageUrl ?? "",
       },
-      status
+      parsed.status
     );
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { error: "Validation failed", details: error.issues },
+        { status: 400 }
+      );
+    }
     console.error("Error updating collection:", error);
     return NextResponse.json(
       { error: "Failed to update collection" },
@@ -113,19 +110,20 @@ export async function DELETE(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const albumId = searchParams.get("albumId");
+    const parsed = collectionDeleteSchema.parse({
+      albumId: searchParams.get("albumId") ?? undefined,
+    });
 
-    if (!albumId) {
-      return NextResponse.json(
-        { error: "Missing albumId" },
-        { status: 400 }
-      );
-    }
-
-    await removeAlbumStatus(auth.userId, albumId);
+    await removeAlbumStatus(auth.userId, parsed.albumId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { error: "Validation failed", details: error.issues },
+        { status: 400 }
+      );
+    }
     console.error("Error removing from collection:", error);
     return NextResponse.json(
       { error: "Failed to remove from collection" },
