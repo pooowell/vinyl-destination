@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Navbar from "@/components/Navbar";
 
-export default function GlobalError({
+export default function AppError({
   error,
   reset,
 }: {
@@ -11,6 +11,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // Log full error details server-side; never expose to users
     console.error("Unhandled error:", error);
   }, [error]);
 
@@ -22,7 +23,7 @@ export default function GlobalError({
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-8 text-center max-w-md">
             <h2 className="text-2xl font-bold mb-2">Something went wrong</h2>
             <p className="text-zinc-400 mb-6">
-              {error.message || "An unexpected error occurred."}
+              Something went wrong. Please try again.
             </p>
             <button
               onClick={reset}
