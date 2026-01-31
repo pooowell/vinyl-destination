@@ -50,16 +50,33 @@ export async function GET() {
 
     // Create a readable stream for SSE
     const encoder = new TextEncoder();
+    let aborted = false;
+
     const stream = new ReadableStream({
       async start(controller) {
+        const safeEnqueue = (chunk: Uint8Array) => {
+          try {
+            controller.enqueue(chunk);
+          } catch {
+            // Controller already closed (client disconnected)
+            aborted = true;
+          }
+        };
+
         const sendAlbum = (album: StreamedAlbum) => {
+          if (aborted) return;
           const data = `data: ${JSON.stringify(album)}\n\n`;
-          controller.enqueue(encoder.encode(data));
+          safeEnqueue(encoder.encode(data));
         };
 
         const sendDone = () => {
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+          if (aborted) return;
+          safeEnqueue(encoder.encode("data: [DONE]\n\n"));
+          try {
+            controller.close();
+          } catch {
+            // Already closed
+          }
         };
 
         try {
@@ -77,6 +94,9 @@ export async function GET() {
             source: RecommendationSource,
             statsGetter?: (albumId: string) => ListeningStats | undefined
           ): Promise<boolean> => {
+            // Bail early if client disconnected
+            if (aborted) return false;
+
             // Skip if already actioned or seen
             if (actionedAlbumIds.has(album.id) || seenAlbumIds.has(album.id)) {
               return false;
@@ -220,11 +240,12 @@ export async function GET() {
           const maxAlbums = 40;
 
           for (const [albums, source] of albumsBySource) {
+            if (aborted) break;
             // Shuffle albums within each source for variety
             const shuffled = [...albums].sort(() => Math.random() - 0.5);
 
             for (const album of shuffled) {
-              if (totalSent >= maxAlbums) break;
+              if (aborted || totalSent >= maxAlbums) break;
               const sent = await processAlbum(album, source, getNotableStats);
               if (sent) totalSent++;
             }
@@ -239,14 +260,14 @@ export async function GET() {
           ].filter((name): name is string => name !== null);
           const collectionArtists = Array.from(new Set(allArtists)).slice(0, 5);
 
-          if (collectionArtists.length > 0 && totalSent < maxAlbums) {
+          if (!aborted && collectionArtists.length > 0 && totalSent < maxAlbums) {
             try {
               // Get recommendations based on collected artists
               const seedArtists = collectionArtists.slice(0, 2);
               const recs = await getRecommendations(accessToken, [], seedArtists);
 
               for (const track of recs.tracks || []) {
-                if (totalSent >= maxAlbums) break;
+                if (aborted || totalSent >= maxAlbums) break;
                 if (track.album) {
                   const sent = await processAlbum(track.album, "collection_based", getNotableStats);
                   if (sent) totalSent++;
@@ -258,11 +279,11 @@ export async function GET() {
           }
 
           // 3. Sprinkle in classics from Discogs most collected
-          if (totalSent < maxAlbums) {
+          if (!aborted && totalSent < maxAlbums) {
             try {
               const classics = await getMostCollectedVinyl(undefined, 10);
               for (const classic of classics) {
-                if (totalSent >= maxAlbums) break;
+                if (aborted || totalSent >= maxAlbums) break;
                 // Parse title (usually "Artist - Album")
                 const parts = classic.title.split(" - ");
                 if (parts.length >= 2) {
@@ -293,11 +314,20 @@ export async function GET() {
           sendDone();
         } catch (error) {
           console.error("Stream error:", error);
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`)
-          );
-          controller.close();
+          if (!aborted) {
+            safeEnqueue(
+              encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`)
+            );
+            try {
+              controller.close();
+            } catch {
+              // Already closed
+            }
+          }
         }
+      },
+      cancel() {
+        aborted = true;
       },
     });
 
