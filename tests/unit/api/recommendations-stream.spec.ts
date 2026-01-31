@@ -44,9 +44,19 @@ function fakeAlbum(id: string, name: string, artist: string) {
     id,
     name,
     album_type: "album",
-    artists: [{ name: artist }],
-    images: [{ url: `https://img/${id}` }],
+    artists: [{ id: `artist-${id}`, name: artist }],
+    images: [{ url: `https://img/${id}`, height: 300, width: 300 }],
     release_date: "2024-01-01",
+  };
+}
+
+// Helper: build a fake SpotifyTrack
+function fakeTrack(name: string, album: ReturnType<typeof fakeAlbum>) {
+  return {
+    id: `track-${album.id}`,
+    name,
+    album,
+    artists: album.artists,
   };
 }
 
@@ -120,7 +130,7 @@ describe("GET /api/recommendations/stream", () => {
   it("returns SSE content-type headers", async () => {
     // Provide minimal data so the stream completes
     vi.mocked(getTopTracks).mockResolvedValue({ items: [] });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
 
     const response = await GET();
@@ -134,9 +144,9 @@ describe("GET /api/recommendations/stream", () => {
     const album1 = fakeAlbum("a1", "OK Computer", "Radiohead");
 
     vi.mocked(getTopTracks).mockResolvedValue({
-      items: [{ name: "Paranoid Android", album: album1 }],
+      items: [fakeTrack("Paranoid Android", album1)],
     });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
     vi.mocked(checkVinylAvailability).mockResolvedValue({
       available: true,
@@ -154,7 +164,7 @@ describe("GET /api/recommendations/stream", () => {
 
   it("stream has a cancel() handler (ReadableStream contract)", async () => {
     vi.mocked(getTopTracks).mockResolvedValue({ items: [] });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
 
     const response = await GET();
@@ -170,9 +180,9 @@ describe("GET /api/recommendations/stream", () => {
     );
 
     vi.mocked(getTopTracks).mockResolvedValue({
-      items: albums.map((a) => ({ name: "Track", album: a })),
+      items: albums.map((a) => fakeTrack("Track", a)),
     });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
 
     // Make checkVinylAvailability slow and always available
@@ -210,9 +220,9 @@ describe("GET /api/recommendations/stream", () => {
     );
 
     vi.mocked(getTopTracks).mockResolvedValue({
-      items: albums.map((a, i) => ({ name: `Track ${i}`, album: a })),
+      items: albums.map((a, i) => fakeTrack(`Track ${i}`, a)),
     });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
 
     vi.mocked(checkVinylAvailability).mockResolvedValue({
@@ -243,9 +253,9 @@ describe("GET /api/recommendations/stream", () => {
     const album1 = fakeAlbum("a1", "Test Album", "Test Artist");
 
     vi.mocked(getTopTracks).mockResolvedValue({
-      items: [{ name: "Track", album: album1 }],
+      items: [fakeTrack("Track", album1)],
     });
-    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [] });
+    vi.mocked(getSavedAlbums).mockResolvedValue({ items: [], total: 0 });
     vi.mocked(getRecentlyPlayed).mockResolvedValue({ items: [] });
     vi.mocked(checkVinylAvailability).mockResolvedValue({
       available: true,
