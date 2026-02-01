@@ -18,11 +18,13 @@ import {
   searchVinylRelease,
   checkVinylAvailability,
   getMostCollectedVinyl,
+  retryDefaults,
 } from "@/lib/discogs";
 
 describe("Discogs API Integration (MSW)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retryDefaults.baseDelayMs = 0;
     mockGetCachedVinylStatus.mockResolvedValue(null);
     mockSetCachedVinylStatus.mockResolvedValue(undefined);
     mockGetBulkCachedVinylStatus.mockResolvedValue(new Map());

@@ -27,11 +27,13 @@ import {
   checkVinylAvailability,
   batchCheckVinylAvailability,
   getMostCollectedVinyl,
+  retryDefaults,
 } from "@/lib/discogs";
 
 describe("discogs - Search Operations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retryDefaults.baseDelayMs = 0;
   });
 
   describe("searchVinylRelease", () => {
@@ -65,10 +67,12 @@ describe("discogs - Search Operations", () => {
     });
 
     it("should throw on rate limit (429)", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-      });
+      const mock429 = { ok: false, status: 429, headers: { get: () => null } };
+      mockFetch
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429);
 
       // Use unique artist/album to avoid in-memory cache from previous test
       await expect(searchVinylRelease("RateLimitArtist", "RateLimitAlbum")).rejects.toThrow(
@@ -77,11 +81,16 @@ describe("discogs - Search Operations", () => {
     });
 
     it("should throw on API error", async () => {
-      mockFetch.mockResolvedValueOnce({
+      const mock500 = {
         ok: false,
         status: 500,
         text: () => Promise.resolve("Server error"),
-      });
+      };
+      mockFetch
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500);
 
       // Use unique artist/album to avoid in-memory cache from previous tests
       await expect(searchVinylRelease("ErrorArtist", "ErrorAlbum")).rejects.toThrow(
@@ -94,6 +103,7 @@ describe("discogs - Search Operations", () => {
 describe("discogs - Vinyl Availability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retryDefaults.baseDelayMs = 0;
   });
 
   describe("checkVinylAvailability", () => {
@@ -225,6 +235,7 @@ describe("discogs - Vinyl Availability", () => {
 describe("discogs - Most Collected Vinyl", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    retryDefaults.baseDelayMs = 0;
   });
 
   describe("getMostCollectedVinyl", () => {
@@ -273,11 +284,16 @@ describe("discogs - Most Collected Vinyl", () => {
     });
 
     it("should return empty array on API error", async () => {
-      mockFetch.mockResolvedValueOnce({
+      const mock500 = {
         ok: false,
         status: 500,
         text: () => Promise.resolve("Server error"),
-      });
+      };
+      mockFetch
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500)
+        .mockResolvedValueOnce(mock500);
 
       // Use unique genre to avoid in-memory cache
       const result = await getMostCollectedVinyl("UniqueGenreForErrorTest", 20);
@@ -286,10 +302,12 @@ describe("discogs - Most Collected Vinyl", () => {
     });
 
     it("should handle rate limiting gracefully", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-      });
+      const mock429 = { ok: false, status: 429, headers: { get: () => null } };
+      mockFetch
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429)
+        .mockResolvedValueOnce(mock429);
 
       // Use unique genre to avoid in-memory cache
       const result = await getMostCollectedVinyl("UniqueGenreForRateLimitTest");

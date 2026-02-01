@@ -10,6 +10,71 @@ const DISCOGS_API_URL = "https://api.discogs.com";
 const memCache = new Map<string, { data: unknown; timestamp: number }>();
 const MEM_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 
+// --- Retry configuration ---
+
+export interface RetryOptions {
+  maxRetries: number;
+  baseDelayMs: number;
+}
+
+/** Default retry settings. Mutable so tests can override. */
+export const retryDefaults: RetryOptions = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+};
+
+/**
+ * Wraps fetch with automatic retry for 429 (rate-limit) and 5xx responses.
+ * Uses exponential backoff: delay = baseDelayMs × 2^attempt.
+ * For 429 responses the Retry-After header is honoured when present.
+ */
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  options?: Partial<RetryOptions>,
+): Promise<Response> {
+  const maxRetries = options?.maxRetries ?? retryDefaults.maxRetries;
+  const baseDelayMs = options?.baseDelayMs ?? retryDefaults.baseDelayMs;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, init);
+
+    const isRetryable =
+      response.status === 429 ||
+      (response.status >= 500 && response.status < 600);
+
+    if (isRetryable && attempt < maxRetries) {
+      let delayMs = baseDelayMs * Math.pow(2, attempt);
+
+      // Respect Retry-After header for 429 responses
+      if (response.status === 429) {
+        const retryAfter = response.headers?.get("Retry-After");
+        if (retryAfter) {
+          const retryAfterMs = parseInt(retryAfter, 10) * 1000;
+          if (!isNaN(retryAfterMs)) {
+            delayMs = Math.max(delayMs, retryAfterMs);
+          }
+        }
+      }
+
+      console.warn(
+        `Discogs API returned ${response.status}, retrying in ${delayMs}ms ` +
+          `(attempt ${attempt + 1}/${maxRetries})`,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    return response;
+  }
+
+  // The loop always returns; this line satisfies TypeScript.
+  throw new Error("fetchWithRetry: exhausted all retry attempts");
+}
+
+// --- Discogs types ---
+
 export interface DiscogsSearchResult {
   id: number;
   title: string;
@@ -41,7 +106,7 @@ async function discogsFetch<T>(endpoint: string): Promise<T> {
     return cached.data as T;
   }
 
-  const response = await fetch(`${DISCOGS_API_URL}${endpoint}`, {
+  const response = await fetchWithRetry(`${DISCOGS_API_URL}${endpoint}`, {
     headers: {
       Authorization: `Discogs token=${process.env.DISCOGS_TOKEN}`,
       "User-Agent": "SpotifyVinylSearch/1.0",
