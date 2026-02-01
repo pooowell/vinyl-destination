@@ -7,10 +7,14 @@ import {
   removeAlbumStatus,
 } from "@/lib/db";
 import { collectionPostSchema, collectionDeleteSchema } from "@/lib/schemas";
+import { applyRateLimit, generalLimiter } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const blocked = applyRateLimit(request, generalLimiter);
+  if (blocked) return blocked;
+
   try {
     const auth = await getAuthenticatedUser();
     if (!auth) {
@@ -66,6 +70,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const blocked = applyRateLimit(request, generalLimiter);
+  if (blocked) return blocked;
+
   try {
     const auth = await getAuthenticatedUser();
     if (!auth) {
@@ -103,6 +110,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const blocked = applyRateLimit(request, generalLimiter);
+  if (blocked) return blocked;
+
   try {
     const auth = await getAuthenticatedUser();
     if (!auth) {

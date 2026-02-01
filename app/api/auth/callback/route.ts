@@ -6,10 +6,14 @@ import {
   clearStateCookie,
   setSessionCookie,
 } from "@/lib/auth";
+import { applyRateLimit, authLimiter } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const blocked = applyRateLimit(request, authLimiter);
+  if (blocked) return blocked;
+
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
   const state = searchParams.get("state");

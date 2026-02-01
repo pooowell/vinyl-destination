@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
+import { applyRateLimit, streamLimiter } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 import {
@@ -39,7 +40,10 @@ export interface StreamedAlbum {
   listeningStats?: ListeningStats;  // Only included when notable
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const blocked = applyRateLimit(request, streamLimiter);
+  if (blocked) return blocked;
+
   try {
     const auth = await getAuthenticatedUser();
     if (!auth) {
