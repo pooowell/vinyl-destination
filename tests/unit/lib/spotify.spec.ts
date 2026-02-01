@@ -5,6 +5,7 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 import {
+  retryDefaults,
   getSpotifyAuthUrl,
   exchangeCodeForTokens,
   refreshAccessToken,
@@ -17,6 +18,9 @@ import {
   getRecommendations,
   extractUniqueAlbums,
 } from "@/lib/spotify";
+
+// Snapshot original defaults so each describe can restore them
+const _origRetryDefaults = { ...retryDefaults };
 
 describe("spotify - Auth URL Generation", () => {
   describe("getSpotifyAuthUrl", () => {
@@ -493,5 +497,240 @@ describe("spotify - Utilities", () => {
       expect(result.length).toBe(1);
       expect(result[0].id).toBe("album1");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry & timeout behaviour
+// ---------------------------------------------------------------------------
+
+describe("spotify - Retry Behavior", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Zero-delay so tests run instantly
+    retryDefaults.baseDelayMs = 0;
+    retryDefaults.maxRetries = 3;
+    retryDefaults.timeoutMs = 15_000;
+  });
+
+  afterEach(() => {
+    Object.assign(retryDefaults, _origRetryDefaults);
+  });
+
+  // Helper to build a mock Response
+  function mockResponse(
+    status: number,
+    body: unknown = "error",
+    headers: Record<string, string> = {}
+  ) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (name: string) => headers[name] ?? null },
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
+    };
+  }
+
+  it("should retry on 429 and succeed on next attempt", async () => {
+    const user = { id: "u1", display_name: "Test" };
+
+    mockFetch
+      .mockResolvedValueOnce(mockResponse(429, "Rate limited"))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(user);
+  });
+
+  it("should retry on 500 and succeed on next attempt", async () => {
+    const user = { id: "u2", display_name: "Test" };
+
+    mockFetch
+      .mockResolvedValueOnce(mockResponse(500, "Server error"))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(user);
+  });
+
+  it("should retry on 503 (5xx range)", async () => {
+    const user = { id: "u3", display_name: "Test" };
+
+    mockFetch
+      .mockResolvedValueOnce(mockResponse(503, "Unavailable"))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(user);
+  });
+
+  it("should respect Retry-After header on 429", async () => {
+    const user = { id: "u4", display_name: "Test" };
+
+    mockFetch
+      .mockResolvedValueOnce(mockResponse(429, "Rate limited", { "Retry-After": "0" }))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(user);
+  });
+
+  it("should throw after exhausting all retries on 429", async () => {
+    // 1 initial + 3 retries = 4 total
+    mockFetch
+      .mockResolvedValue(mockResponse(429, "Rate limited"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("Spotify API error");
+    expect(mockFetch).toHaveBeenCalledTimes(4); // 1 + maxRetries
+  });
+
+  it("should throw after exhausting all retries on 500", async () => {
+    mockFetch
+      .mockResolvedValue(mockResponse(500, "Server error"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("Spotify API error");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("should NOT retry on 401 (non-retryable)", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(401, "Unauthorized"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("Spotify API error");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should NOT retry on 403 (non-retryable)", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(403, "Forbidden"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("Spotify API error");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should NOT retry on 404 (non-retryable)", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(404, "Not found"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("Spotify API error");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("should retry on network errors and eventually succeed", async () => {
+    const user = { id: "u5", display_name: "Net" };
+
+    mockFetch
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(user);
+  });
+
+  it("should throw after exhausting retries on network errors", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"));
+
+    await expect(getCurrentUser("tok")).rejects.toThrow("fetch failed");
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("should recover after multiple 429s then success", async () => {
+    const user = { id: "u6", display_name: "Multi" };
+
+    mockFetch
+      .mockResolvedValueOnce(mockResponse(429, "Rate limited"))
+      .mockResolvedValueOnce(mockResponse(429, "Rate limited"))
+      .mockResolvedValueOnce(mockResponse(200, user));
+
+    const result = await getCurrentUser("tok");
+
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(result).toEqual(user);
+  });
+
+  it("should pass AbortSignal.timeout to spotifyFetch calls", async () => {
+    mockFetch.mockResolvedValueOnce(mockResponse(200, { id: "u7" }));
+
+    await getCurrentUser("tok");
+
+    const fetchOptions = mockFetch.mock.calls[0][1];
+    expect(fetchOptions).toHaveProperty("signal");
+  });
+});
+
+describe("spotify - Auth Timeout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    retryDefaults.timeoutMs = 15_000;
+  });
+
+  afterEach(() => {
+    Object.assign(retryDefaults, _origRetryDefaults);
+  });
+
+  it("exchangeCodeForTokens should include timeout signal", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          access_token: "at",
+          token_type: "Bearer",
+          scope: "user-read-email",
+          expires_in: 3600,
+          refresh_token: "rt",
+        }),
+    });
+
+    await exchangeCodeForTokens("code");
+
+    const fetchOptions = mockFetch.mock.calls[0][1];
+    expect(fetchOptions).toHaveProperty("signal");
+  });
+
+  it("refreshAccessToken should include timeout signal", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          access_token: "at2",
+          token_type: "Bearer",
+          scope: "user-read-email",
+          expires_in: 3600,
+          refresh_token: "rt2",
+        }),
+    });
+
+    await refreshAccessToken("old-rt");
+
+    const fetchOptions = mockFetch.mock.calls[0][1];
+    expect(fetchOptions).toHaveProperty("signal");
+  });
+
+  it("exchangeCodeForTokens should NOT retry on failure", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      text: () => Promise.resolve("Bad request"),
+    });
+
+    await expect(exchangeCodeForTokens("bad")).rejects.toThrow("Failed to exchange code");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshAccessToken should NOT retry on failure", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      text: () => Promise.resolve("Invalid token"),
+    });
+
+    await expect(refreshAccessToken("bad")).rejects.toThrow("Failed to refresh token");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
