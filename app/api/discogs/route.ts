@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { checkVinylAvailability } from "@/lib/discogs";
+import { applyRateLimit, generalLimiter } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const blocked = applyRateLimit(request, generalLimiter);
+  if (blocked) return blocked;
+
   try {
     const auth = await getAuthenticatedUser();
     if (!auth) {
