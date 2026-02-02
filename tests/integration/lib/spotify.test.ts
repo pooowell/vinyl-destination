@@ -10,6 +10,7 @@ import {
   getTopArtists,
   getSavedAlbums,
   getRecentlyPlayed,
+  getAlbumDetails,
   getArtistAlbums,
   getRecommendations,
 } from "@/lib/spotify";
@@ -105,6 +106,33 @@ describe("Spotify API Integration (MSW)", () => {
 
     it("should throw error for expired token", async () => {
       await expect(getTopArtists("expired_token")).rejects.toThrow();
+    });
+  });
+
+  describe("getAlbumDetails", () => {
+    it("should fetch album details with valid token", async () => {
+      const album = await getAlbumDetails("valid_access_token", "album123");
+
+      expect(album.id).toBe("album123");
+      expect(album.name).toBe("Test Album Details");
+      expect(album.artists[0].name).toBe("Test Artist");
+      expect(album.total_tracks).toBe(12);
+      expect(album.label).toBe("Test Records");
+      expect(album.tracks.items).toHaveLength(2);
+      expect(album.tracks.items[0].name).toBe("Test Track 1");
+      expect(album.tracks.items[0].duration_ms).toBe(240000);
+    });
+
+    it("should throw error for invalid album", async () => {
+      await expect(
+        getAlbumDetails("valid_access_token", "invalid_album")
+      ).rejects.toThrow();
+    });
+
+    it("should throw error for expired token", async () => {
+      await expect(
+        getAlbumDetails("expired_token", "album123")
+      ).rejects.toThrow();
     });
   });
 
