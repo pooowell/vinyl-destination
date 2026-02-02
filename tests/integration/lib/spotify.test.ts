@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../../mocks/server";
 import {
+  retryDefaults,
   exchangeCodeForTokens,
   refreshAccessToken,
   getCurrentUser,
@@ -12,6 +13,8 @@ import {
   getArtistAlbums,
   getRecommendations,
 } from "@/lib/spotify";
+
+const _origRetryDefaults = { ...retryDefaults };
 
 describe("Spotify API Integration (MSW)", () => {
   describe("exchangeCodeForTokens", () => {
@@ -176,6 +179,15 @@ describe("Spotify API Integration (MSW)", () => {
   });
 
   describe("error handling", () => {
+    beforeEach(() => {
+      // Zero-delay retries so integration error tests don't time out
+      retryDefaults.baseDelayMs = 0;
+    });
+
+    afterEach(() => {
+      Object.assign(retryDefaults, _origRetryDefaults);
+    });
+
     it("should handle network errors gracefully", async () => {
       server.use(
         http.get("https://api.spotify.com/v1/me", () => {
