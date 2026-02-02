@@ -137,7 +137,10 @@ async function spotifyFetch<T>(accessToken: string, endpoint: string): Promise<T
         if (response.status === 429) {
           const retryAfter = response.headers?.get?.("Retry-After");
           if (retryAfter) {
-            delayMs = Number(retryAfter) * 1000;
+            const parsed = Number(retryAfter);
+            if (!Number.isNaN(parsed) && parsed > 0) {
+              delayMs = parsed * 1000;
+            }
           }
         }
 
