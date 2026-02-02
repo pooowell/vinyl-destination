@@ -29,6 +29,7 @@ export default function RecommendationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<StreamedAlbum | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -126,56 +127,50 @@ export default function RecommendationsPage() {
     }
   };
 
-  const handleOwn = async (album: Album) => {
-    const res = await fetch("/api/collection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        albumId: album.id,
-        albumName: album.name,
-        artistName: album.artist,
-        imageUrl: album.imageUrl,
-        status: "owned",
-      }),
-    });
+  const updateAlbumStatus = async (
+    album: Album,
+    status: string,
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/collection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          albumId: album.id,
+          albumName: album.name,
+          artistName: album.artist,
+          imageUrl: album.imageUrl,
+          status,
+        }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "Unknown error");
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      return true;
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to update album",
+      );
+      setTimeout(() => setActionError(null), 4000);
+      return false;
+    }
+  };
 
-    if (res.ok) {
+  const handleOwn = async (album: Album) => {
+    if (await updateAlbumStatus(album, "owned")) {
       setAlbums((prev) => prev.filter((a) => a.id !== album.id));
     }
   };
 
   const handleWishlist = async (album: Album) => {
-    const res = await fetch("/api/collection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        albumId: album.id,
-        albumName: album.name,
-        artistName: album.artist,
-        imageUrl: album.imageUrl,
-        status: "wishlist",
-      }),
-    });
-
-    if (res.ok) {
+    if (await updateAlbumStatus(album, "wishlist")) {
       setAlbums((prev) => prev.filter((a) => a.id !== album.id));
     }
   };
 
   const handleSkip = async (album: Album) => {
-    const res = await fetch("/api/collection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        albumId: album.id,
-        albumName: album.name,
-        artistName: album.artist,
-        imageUrl: album.imageUrl,
-        status: "skipped",
-      }),
-    });
-
-    if (res.ok) {
+    if (await updateAlbumStatus(album, "skipped")) {
       setAlbums((prev) => prev.filter((a) => a.id !== album.id));
       setIsModalOpen(false);
       setSelectedAlbum(null);
@@ -183,19 +178,7 @@ export default function RecommendationsPage() {
   };
 
   const handleNotInterested = async (album: Album) => {
-    const res = await fetch("/api/collection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        albumId: album.id,
-        albumName: album.name,
-        artistName: album.artist,
-        imageUrl: album.imageUrl,
-        status: "not_interested",
-      }),
-    });
-
-    if (res.ok) {
+    if (await updateAlbumStatus(album, "not_interested")) {
       setAlbums((prev) => prev.filter((a) => a.id !== album.id));
       setIsModalOpen(false);
       setSelectedAlbum(null);
@@ -210,31 +193,43 @@ export default function RecommendationsPage() {
     }
   };
 
-  const handleModalOwn = () => {
+  const handleModalOwn = async () => {
     if (selectedAlbum) {
-      handleOwn(selectedAlbum);
-      setIsModalOpen(false);
-      setSelectedAlbum(null);
+      if (await updateAlbumStatus(selectedAlbum, "owned")) {
+        setAlbums((prev) => prev.filter((a) => a.id !== selectedAlbum.id));
+        setIsModalOpen(false);
+        setSelectedAlbum(null);
+      }
     }
   };
 
-  const handleModalWishlist = () => {
+  const handleModalWishlist = async () => {
     if (selectedAlbum) {
-      handleWishlist(selectedAlbum);
-      setIsModalOpen(false);
-      setSelectedAlbum(null);
+      if (await updateAlbumStatus(selectedAlbum, "wishlist")) {
+        setAlbums((prev) => prev.filter((a) => a.id !== selectedAlbum.id));
+        setIsModalOpen(false);
+        setSelectedAlbum(null);
+      }
     }
   };
 
-  const handleModalSkip = () => {
+  const handleModalSkip = async () => {
     if (selectedAlbum) {
-      handleSkip(selectedAlbum);
+      if (await updateAlbumStatus(selectedAlbum, "skipped")) {
+        setAlbums((prev) => prev.filter((a) => a.id !== selectedAlbum.id));
+        setIsModalOpen(false);
+        setSelectedAlbum(null);
+      }
     }
   };
 
-  const handleModalNotInterested = () => {
+  const handleModalNotInterested = async () => {
     if (selectedAlbum) {
-      handleNotInterested(selectedAlbum);
+      if (await updateAlbumStatus(selectedAlbum, "not_interested")) {
+        setAlbums((prev) => prev.filter((a) => a.id !== selectedAlbum.id));
+        setIsModalOpen(false);
+        setSelectedAlbum(null);
+      }
     }
   };
 
@@ -247,6 +242,21 @@ export default function RecommendationsPage() {
     <div className="min-h-screen">
       <Navbar />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {actionError && (
+          <div
+            role="alert"
+            className="mb-4 flex items-center justify-between rounded-lg bg-red-900/60 px-4 py-3 text-sm text-red-200 border border-red-700"
+          >
+            <span>{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="ml-4 text-red-300 hover:text-white"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <div className="mb-8">
           <h1 className="text-3xl font-bold">Recommendations</h1>
           <p className="text-zinc-400 mt-2">
