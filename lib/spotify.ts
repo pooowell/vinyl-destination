@@ -205,6 +205,34 @@ export async function getRecentlyPlayed(
   return spotifyFetch(accessToken, `/me/player/recently-played?limit=${limit}`);
 }
 
+export interface SpotifyAlbumTrack {
+  id: string;
+  name: string;
+  track_number: number;
+  duration_ms: number;
+  preview_url: string | null;
+  external_urls: { spotify: string };
+}
+
+export interface SpotifyAlbumDetails {
+  id: string;
+  name: string;
+  artists: { id: string; name: string }[];
+  images: { url: string; height: number; width: number }[];
+  release_date: string;
+  total_tracks: number;
+  label: string;
+  external_urls: { spotify: string };
+  tracks: { items: SpotifyAlbumTrack[] };
+}
+
+export async function getAlbumDetails(
+  accessToken: string,
+  albumId: string
+): Promise<SpotifyAlbumDetails> {
+  return spotifyFetch<SpotifyAlbumDetails>(accessToken, `/albums/${albumId}`);
+}
+
 export async function getArtistAlbums(
   accessToken: string,
   artistId: string,

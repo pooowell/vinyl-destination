@@ -1,37 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { searchVinylRelease } from "@/lib/discogs";
+import { getAlbumDetails, getTopTracks } from "@/lib/spotify";
 
 export const dynamic = "force-dynamic";
-
-const SPOTIFY_API_URL = "https://api.spotify.com/v1";
-
-interface SpotifyTrack {
-  id: string;
-  name: string;
-  track_number: number;
-  duration_ms: number;
-  preview_url: string | null;
-  external_urls: {
-    spotify: string;
-  };
-}
-
-interface SpotifyAlbumDetails {
-  id: string;
-  name: string;
-  artists: { id: string; name: string }[];
-  images: { url: string; height: number; width: number }[];
-  release_date: string;
-  total_tracks: number;
-  label: string;
-  external_urls: {
-    spotify: string;
-  };
-  tracks: {
-    items: SpotifyTrack[];
-  };
-}
 
 export async function GET(
   request: NextRequest,
@@ -46,53 +18,32 @@ export async function GET(
     const { id: albumId } = await params;
     const { accessToken } = auth;
 
-    // Fetch album details from Spotify
-    const albumResponse = await fetch(`${SPOTIFY_API_URL}/albums/${albumId}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!albumResponse.ok) {
-      throw new Error("Failed to fetch album from Spotify");
-    }
-
-    const album: SpotifyAlbumDetails = await albumResponse.json();
-
-    // Fetch user's top tracks (both recent and all-time) to see which tracks from this album they listen to most
-    const [recentTracksResponse, allTimeTracksResponse] = await Promise.all([
-      fetch(`${SPOTIFY_API_URL}/me/top/tracks?limit=50&time_range=medium_term`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
-      fetch(`${SPOTIFY_API_URL}/me/top/tracks?limit=50&time_range=long_term`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }),
+    // Fetch album details and user's top tracks (recent + all-time) in parallel
+    // All calls go through spotifyFetch() with retry/backoff/timeout
+    const [album, recentTracksResponse, allTimeTracksResponse] = await Promise.all([
+      getAlbumDetails(accessToken, albumId),
+      getTopTracks(accessToken, "medium_term", 50),
+      getTopTracks(accessToken, "long_term", 50),
     ]);
 
-    let recentTopTracks: { id: string; name: string; rank: number }[] = [];
-    let allTimeTopTracks: { id: string; name: string; rank: number }[] = [];
+    // Filter top tracks to those belonging to this album
+    const recentTopTracks = recentTracksResponse.items
+      .map((track, index) => ({
+        id: track.id,
+        name: track.name,
+        albumId: track.album.id,
+        rank: index + 1,
+      }))
+      .filter((track) => track.albumId === albumId);
 
-    if (recentTracksResponse.ok) {
-      const topTracks = await recentTracksResponse.json();
-      recentTopTracks = topTracks.items
-        .map((track: { id: string; name: string; album: { id: string } }, index: number) => ({
-          id: track.id,
-          name: track.name,
-          albumId: track.album.id,
-          rank: index + 1,
-        }))
-        .filter((track: { albumId: string }) => track.albumId === albumId);
-    }
-
-    if (allTimeTracksResponse.ok) {
-      const topTracks = await allTimeTracksResponse.json();
-      allTimeTopTracks = topTracks.items
-        .map((track: { id: string; name: string; album: { id: string } }, index: number) => ({
-          id: track.id,
-          name: track.name,
-          albumId: track.album.id,
-          rank: index + 1,
-        }))
-        .filter((track: { albumId: string }) => track.albumId === albumId);
-    }
+    const allTimeTopTracks = allTimeTracksResponse.items
+      .map((track, index) => ({
+        id: track.id,
+        name: track.name,
+        albumId: track.album.id,
+        rank: index + 1,
+      }))
+      .filter((track) => track.albumId === albumId);
 
     // Use recent tracks if available, otherwise all-time
     const userTopTracksFromAlbum = recentTopTracks.length > 0 ? recentTopTracks : allTimeTopTracks;
