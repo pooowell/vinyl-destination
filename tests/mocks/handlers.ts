@@ -62,6 +62,50 @@ export const spotifyHandlers = [
     });
   }),
 
+  // Album details
+  http.get("https://api.spotify.com/v1/albums/:albumId", ({ request, params }) => {
+    const auth = request.headers.get("Authorization");
+    if (!auth || auth === "Bearer expired_token") {
+      return HttpResponse.json({ error: { message: "Unauthorized" } }, { status: 401 });
+    }
+
+    const albumId = params.albumId;
+    if (albumId === "invalid_album") {
+      return HttpResponse.json({ error: { message: "Album not found" } }, { status: 404 });
+    }
+
+    return HttpResponse.json({
+      id: albumId,
+      name: "Test Album Details",
+      artists: [{ id: "artist1", name: "Test Artist" }],
+      images: [{ url: "https://example.com/album.jpg", height: 640, width: 640 }],
+      release_date: "2023-06-15",
+      total_tracks: 12,
+      label: "Test Records",
+      external_urls: { spotify: `https://open.spotify.com/album/${albumId}` },
+      tracks: {
+        items: [
+          {
+            id: "track1",
+            name: "Test Track 1",
+            track_number: 1,
+            duration_ms: 240000,
+            preview_url: "https://example.com/preview1.mp3",
+            external_urls: { spotify: "https://open.spotify.com/track/track1" },
+          },
+          {
+            id: "track2",
+            name: "Test Track 2",
+            track_number: 2,
+            duration_ms: 180000,
+            preview_url: null,
+            external_urls: { spotify: "https://open.spotify.com/track/track2" },
+          },
+        ],
+      },
+    });
+  }),
+
   // Top tracks
   http.get("https://api.spotify.com/v1/me/top/tracks", ({ request }) => {
     const auth = request.headers.get("Authorization");
