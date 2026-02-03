@@ -10,6 +10,13 @@ const SCOPES = [
   "user-read-recently-played",
 ].join(" ");
 
+/** Retry / timeout knobs — exported so tests can override. */
+export const retryDefaults = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  timeoutMs: 15_000,
+};
+
 export function getSpotifyAuthUrl(state: string): string {
   const params = new URLSearchParams({
     client_id: process.env.SPOTIFY_CLIENT_ID!,
@@ -44,6 +51,7 @@ export async function exchangeCodeForTokens(code: string): Promise<TokenResponse
       code,
       redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
     }),
+    signal: AbortSignal.timeout(retryDefaults.timeoutMs),
   });
 
   if (!response.ok) {
@@ -67,6 +75,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
       grant_type: "refresh_token",
       refresh_token: refreshToken,
     }),
+    signal: AbortSignal.timeout(retryDefaults.timeoutMs),
   });
 
   if (!response.ok) {
@@ -107,18 +116,58 @@ export interface SpotifyTrack {
 }
 
 async function spotifyFetch<T>(accessToken: string, endpoint: string): Promise<T> {
-  const response = await fetch(`${SPOTIFY_API_URL}${endpoint}`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
+  for (let attempt = 0; attempt <= retryDefaults.maxRetries; attempt++) {
+    try {
+      const response = await fetch(`${SPOTIFY_API_URL}${endpoint}`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        signal: AbortSignal.timeout(retryDefaults.timeoutMs),
+      });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Spotify API error: ${error}`);
+      if (response.ok) {
+        return response.json();
+      }
+
+      const retryable = response.status === 429 || response.status >= 500;
+
+      if (retryable && attempt < retryDefaults.maxRetries) {
+        let delayMs = retryDefaults.baseDelayMs * Math.pow(2, attempt);
+
+        if (response.status === 429) {
+          const retryAfter = response.headers?.get?.("Retry-After");
+          if (retryAfter) {
+            const parsed = Number(retryAfter);
+            if (!Number.isNaN(parsed) && parsed > 0) {
+              delayMs = parsed * 1000;
+            }
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      const error = await response.text();
+      throw new Error(`Spotify API error: ${error}`);
+    } catch (err) {
+      // Re-throw our own errors immediately
+      if (err instanceof Error && err.message.startsWith("Spotify API error:")) {
+        throw err;
+      }
+      // Network / timeout errors — retry if attempts remain
+      if (attempt < retryDefaults.maxRetries) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryDefaults.baseDelayMs * Math.pow(2, attempt))
+        );
+        continue;
+      }
+      throw err;
+    }
   }
 
-  return response.json();
+  // Unreachable in practice, but satisfies TypeScript
+  throw new Error("Spotify API error: max retries exceeded");
 }
 
 export async function getCurrentUser(accessToken: string): Promise<SpotifyUser> {
@@ -154,6 +203,34 @@ export async function getRecentlyPlayed(
   limit = 50
 ): Promise<{ items: { track: SpotifyTrack; played_at: string }[] }> {
   return spotifyFetch(accessToken, `/me/player/recently-played?limit=${limit}`);
+}
+
+export interface SpotifyAlbumTrack {
+  id: string;
+  name: string;
+  track_number: number;
+  duration_ms: number;
+  preview_url: string | null;
+  external_urls: { spotify: string };
+}
+
+export interface SpotifyAlbumDetails {
+  id: string;
+  name: string;
+  artists: { id: string; name: string }[];
+  images: { url: string; height: number; width: number }[];
+  release_date: string;
+  total_tracks: number;
+  label: string;
+  external_urls: { spotify: string };
+  tracks: { items: SpotifyAlbumTrack[] };
+}
+
+export async function getAlbumDetails(
+  accessToken: string,
+  albumId: string
+): Promise<SpotifyAlbumDetails> {
+  return spotifyFetch<SpotifyAlbumDetails>(accessToken, `/albums/${albumId}`);
 }
 
 export async function getArtistAlbums(
