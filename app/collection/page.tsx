@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
@@ -13,10 +13,19 @@ export default function CollectionPage() {
   const [wishlistAlbums, setWishlistAlbums] = useState<Album[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCollection();
   }, []);
+
+  // Auto-dismiss remove errors after 5 seconds
+  useEffect(() => {
+    if (!removeError) return;
+    const timer = setTimeout(() => setRemoveError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [removeError]);
 
   const fetchCollection = async () => {
     try {
@@ -46,25 +55,49 @@ export default function CollectionPage() {
     }
   };
 
-  const handleRemoveOwned = async (album: Album) => {
-    const res = await fetch(`/api/collection?albumId=${album.id}`, {
-      method: "DELETE",
-    });
+  const handleRemove = useCallback(
+    async (
+      album: Album,
+      setList: React.Dispatch<React.SetStateAction<Album[]>>
+    ) => {
+      setRemoveError(null);
+      setRemovingId(album.id);
+      try {
+        const res = await fetch(`/api/collection?albumId=${album.id}`, {
+          method: "DELETE",
+        });
 
-    if (res.ok) {
-      setOwnedAlbums((prev) => prev.filter((a) => a.id !== album.id));
-    }
-  };
+        if (!res.ok) {
+          throw new Error(
+            `Failed to remove "${album.name}" from your collection. Please try again.`
+          );
+        }
 
-  const handleRemoveWishlist = async (album: Album) => {
-    const res = await fetch(`/api/collection?albumId=${album.id}`, {
-      method: "DELETE",
-    });
+        setList((prev) => prev.filter((a) => a.id !== album.id));
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Failed to remove")) {
+          setRemoveError(err.message);
+        } else {
+          setRemoveError(
+            `Could not remove "${album.name}". Check your connection and try again.`
+          );
+        }
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    []
+  );
 
-    if (res.ok) {
-      setWishlistAlbums((prev) => prev.filter((a) => a.id !== album.id));
-    }
-  };
+  const handleRemoveOwned = useCallback(
+    (album: Album) => handleRemove(album, setOwnedAlbums),
+    [handleRemove]
+  );
+
+  const handleRemoveWishlist = useCallback(
+    (album: Album) => handleRemove(album, setWishlistAlbums),
+    [handleRemove]
+  );
 
   const totalAlbums = ownedAlbums.length + wishlistAlbums.length;
 
@@ -78,6 +111,25 @@ export default function CollectionPage() {
             {ownedAlbums.length} owned, {wishlistAlbums.length} on wishlist
           </p>
         </div>
+
+        {/* Remove error banner */}
+        {removeError && (
+          <div
+            role="alert"
+            className="mb-6 flex items-center justify-between gap-3 rounded-lg bg-red-600/20 border border-red-600/40 px-4 py-3 text-red-400"
+          >
+            <p className="text-sm">{removeError}</p>
+            <button
+              onClick={() => setRemoveError(null)}
+              className="shrink-0 text-red-400 hover:text-red-300 transition-colors"
+              aria-label="Dismiss error"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
@@ -108,12 +160,14 @@ export default function CollectionPage() {
                 Owned ({ownedAlbums.length})
               </h2>
               {ownedAlbums.length > 0 ? (
-                <AlbumGrid
-                  albums={ownedAlbums}
-                  showActions={true}
-                  onRemove={handleRemoveOwned}
-                  emptyMessage=""
-                />
+                <div className={removingId && ownedAlbums.some(a => a.id === removingId) ? "opacity-60 pointer-events-none transition-opacity" : "transition-opacity"}>
+                  <AlbumGrid
+                    albums={ownedAlbums}
+                    showActions={true}
+                    onRemove={handleRemoveOwned}
+                    emptyMessage=""
+                  />
+                </div>
               ) : (
                 <p className="text-zinc-500 text-sm">No owned albums yet.</p>
               )}
@@ -126,12 +180,14 @@ export default function CollectionPage() {
                 Wishlist ({wishlistAlbums.length})
               </h2>
               {wishlistAlbums.length > 0 ? (
-                <AlbumGrid
-                  albums={wishlistAlbums}
-                  showActions={true}
-                  onRemove={handleRemoveWishlist}
-                  emptyMessage=""
-                />
+                <div className={removingId && wishlistAlbums.some(a => a.id === removingId) ? "opacity-60 pointer-events-none transition-opacity" : "transition-opacity"}>
+                  <AlbumGrid
+                    albums={wishlistAlbums}
+                    showActions={true}
+                    onRemove={handleRemoveWishlist}
+                    emptyMessage=""
+                  />
+                </div>
               ) : (
                 <p className="text-zinc-500 text-sm">No albums on your wishlist yet.</p>
               )}
