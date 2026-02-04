@@ -12,6 +12,16 @@ export default function NotInterestedPage() {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  // Auto-dismiss action errors after 5 seconds
+  useEffect(() => {
+    if (actionError) {
+      const timer = setTimeout(() => setActionError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionError]);
 
   useEffect(() => {
     fetchNotInterested();
@@ -46,13 +56,24 @@ export default function NotInterestedPage() {
   };
 
   const handleRestore = async (album: Album) => {
-    // Remove from not_interested (this will put it back in recommendations)
-    const res = await fetch(`/api/collection?albumId=${album.id}`, {
-      method: "DELETE",
-    });
+    setRestoringId(album.id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/collection?albumId=${album.id}`, {
+        method: "DELETE",
+      });
 
-    if (res.ok) {
+      if (!res.ok) {
+        throw new Error("Failed to restore album");
+      }
+
       setAlbums((prev) => prev.filter((a) => a.id !== album.id));
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to restore album"
+      );
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -72,6 +93,22 @@ export default function NotInterestedPage() {
             Albums you dismissed. Restore them to see them in recommendations again.
           </p>
         </div>
+
+        {actionError && (
+          <div
+            role="alert"
+            className="mb-6 p-4 bg-red-600/20 border border-red-600/50 rounded-lg text-red-400 flex items-center justify-between"
+          >
+            <span>{actionError}</span>
+            <button
+              onClick={() => setActionError(null)}
+              className="ml-4 text-red-400 hover:text-red-300"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
