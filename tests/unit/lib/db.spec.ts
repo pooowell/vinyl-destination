@@ -133,6 +133,30 @@ describe("db - User Operations", () => {
       expect(user!.refresh_token).toBe("new-refresh");
       expect(user!.token_expires_at).toBe(9999999999);
     });
+
+    it("should be a no-op for non-existent user", () => {
+      // Should not throw
+      updateUserTokens("nonexistent", "token", "refresh", 9999);
+      const user = getUser("nonexistent");
+      expect(user).toBeUndefined();
+    });
+
+    it("should not affect other user fields", () => {
+      seedUser(db, {
+        id: "user123",
+        display_name: "Original Name",
+        email: "original@example.com",
+        access_token: "old-access",
+        refresh_token: "old-refresh",
+        token_expires_at: 1000,
+      });
+
+      updateUserTokens("user123", "new-access", "new-refresh", 9999);
+
+      const user = getUser("user123");
+      expect(user!.display_name).toBe("Original Name");
+      expect(user!.email).toBe("original@example.com");
+    });
   });
 });
 
@@ -190,6 +214,55 @@ describe("db - Album Operations", () => {
       const owned = getUserAlbumsByStatus("user123", "owned");
       expect(wishlist).toHaveLength(0);
       expect(owned).toHaveLength(1);
+    });
+
+    it("should support full status lifecycle: owned → wishlist → skipped → not_interested", () => {
+      seedUser(db, { id: "user123" });
+      const album = {
+        album_id: "album456",
+        album_name: "Test Album",
+        artist_name: "Test Artist",
+        image_url: "https://example.com/image.jpg",
+      };
+
+      const statuses: Array<"owned" | "wishlist" | "skipped" | "not_interested"> = [
+        "owned",
+        "wishlist",
+        "skipped",
+        "not_interested",
+      ];
+
+      for (const status of statuses) {
+        setAlbumStatus("user123", album, status);
+        const albums = getUserAlbumsByStatus("user123", status);
+        expect(albums).toHaveLength(1);
+        expect(albums[0].status).toBe(status);
+      }
+
+      // Only the final status should remain
+      expect(getUserAlbumsByStatus("user123", "owned")).toHaveLength(0);
+      expect(getUserAlbumsByStatus("user123", "wishlist")).toHaveLength(0);
+      expect(getUserAlbumsByStatus("user123", "skipped")).toHaveLength(0);
+      expect(getUserAlbumsByStatus("user123", "not_interested")).toHaveLength(1);
+    });
+
+    it("should isolate albums between different users", () => {
+      seedUser(db, { id: "userA" });
+      seedUser(db, { id: "userB" });
+      const album = {
+        album_id: "shared-album",
+        album_name: "Shared Album",
+        artist_name: "Artist",
+        image_url: "https://example.com/image.jpg",
+      };
+
+      setAlbumStatus("userA", album, "owned");
+      setAlbumStatus("userB", album, "wishlist");
+
+      expect(getUserAlbumsByStatus("userA", "owned")).toHaveLength(1);
+      expect(getUserAlbumsByStatus("userA", "wishlist")).toHaveLength(0);
+      expect(getUserAlbumsByStatus("userB", "wishlist")).toHaveLength(1);
+      expect(getUserAlbumsByStatus("userB", "owned")).toHaveLength(0);
     });
   });
 
@@ -280,6 +353,28 @@ describe("db - Album Operations", () => {
       const result = getActiveUserAlbumIds("user123");
       expect(result).toEqual([]);
     });
+
+    it("should include not_interested albums as active", () => {
+      seedUser(db, { id: "user123" });
+      const now = Math.floor(Date.now() / 1000);
+
+      seedAlbum(db, { user_id: "user123", album_id: "ni1", status: "not_interested", created_at: now - 999999 });
+
+      const result = getActiveUserAlbumIds("user123");
+      expect(result).toContain("ni1");
+    });
+
+    it("should handle skip at exact 48h boundary as expired", () => {
+      seedUser(db, { id: "user123" });
+      const now = Math.floor(Date.now() / 1000);
+      const exactly48h = now - 48 * 60 * 60;
+
+      seedAlbum(db, { user_id: "user123", album_id: "boundary_skip", status: "skipped", created_at: exactly48h });
+
+      const result = getActiveUserAlbumIds("user123");
+      // created_at <= expiryTime means expired (the query uses > not >=)
+      expect(result).not.toContain("boundary_skip");
+    });
   });
 
   describe("cleanupExpiredSkips", () => {
@@ -298,6 +393,33 @@ describe("db - Album Operations", () => {
       expect(allIds).toContain("owned1");
       expect(allIds).not.toContain("old_skip");
     });
+
+    it("should be a no-op when no expired skips exist", () => {
+      seedUser(db, { id: "user123" });
+      const now = Math.floor(Date.now() / 1000);
+
+      seedAlbum(db, { user_id: "user123", album_id: "recent_skip", status: "skipped", created_at: now - 100 });
+      seedAlbum(db, { user_id: "user123", album_id: "owned1", status: "owned", created_at: now });
+
+      cleanupExpiredSkips("user123");
+
+      const allIds = getAllUserAlbumIds("user123");
+      expect(allIds).toHaveLength(2);
+    });
+
+    it("should not touch other users' expired skips", () => {
+      seedUser(db, { id: "userA" });
+      seedUser(db, { id: "userB" });
+      const now = Math.floor(Date.now() / 1000);
+
+      seedAlbum(db, { user_id: "userA", album_id: "a_old_skip", status: "skipped", created_at: now - 200000 });
+      seedAlbum(db, { user_id: "userB", album_id: "b_old_skip", status: "skipped", created_at: now - 200000 });
+
+      cleanupExpiredSkips("userA");
+
+      expect(getAllUserAlbumIds("userA")).not.toContain("a_old_skip");
+      expect(getAllUserAlbumIds("userB")).toContain("b_old_skip");
+    });
   });
 
   describe("removeAlbumStatus", () => {
@@ -311,6 +433,26 @@ describe("db - Album Operations", () => {
 
       const allIds = getAllUserAlbumIds("user123");
       expect(allIds).not.toContain("album456");
+    });
+
+    it("should be a no-op for non-existent album", () => {
+      seedUser(db, { id: "user123" });
+      // Should not throw
+      removeAlbumStatus("user123", "nonexistent");
+    });
+
+    it("should only remove the targeted album", () => {
+      seedUser(db, { id: "user123" });
+      const now = Math.floor(Date.now() / 1000);
+
+      seedAlbum(db, { user_id: "user123", album_id: "album1", status: "owned", created_at: now });
+      seedAlbum(db, { user_id: "user123", album_id: "album2", status: "owned", created_at: now });
+
+      removeAlbumStatus("user123", "album1");
+
+      const allIds = getAllUserAlbumIds("user123");
+      expect(allIds).not.toContain("album1");
+      expect(allIds).toContain("album2");
     });
   });
 });
@@ -433,6 +575,28 @@ describe("db - Vinyl Cache Operations", () => {
       const albums = [{ artist: "Unknown", album: "Unknown" }];
       const result = getBulkCachedVinylStatus(albums);
       expect(result.size).toBe(0);
+    });
+
+    it("should return partial results when only some albums are cached", () => {
+      const now = Math.floor(Date.now() / 1000);
+
+      seedVinylCache(db, {
+        artist_name: "cached artist",
+        album_name: "cached album",
+        has_vinyl: true,
+        discogs_url: "https://discogs.com/1",
+        checked_at: now,
+      });
+
+      const albums = [
+        { artist: "Cached Artist", album: "Cached Album" },
+        { artist: "Missing Artist", album: "Missing Album" },
+      ];
+
+      const result = getBulkCachedVinylStatus(albums);
+      expect(result.size).toBe(1);
+      expect(result.has("cached artist|cached album")).toBe(true);
+      expect(result.has("missing artist|missing album")).toBe(false);
     });
 
     it("should handle empty album list", () => {
