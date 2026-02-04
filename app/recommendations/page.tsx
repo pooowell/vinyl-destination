@@ -31,6 +31,7 @@ export default function RecommendationsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const actionErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetchRecommendations();
@@ -39,6 +40,9 @@ export default function RecommendationsPage() {
       // Cleanup: abort stream on unmount
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+      }
+      if (actionErrorTimeoutRef.current) {
+        clearTimeout(actionErrorTimeoutRef.current);
       }
     };
   }, []);
@@ -152,7 +156,13 @@ export default function RecommendationsPage() {
       setActionError(
         err instanceof Error ? err.message : "Failed to update album",
       );
-      setTimeout(() => setActionError(null), 4000);
+      if (actionErrorTimeoutRef.current) {
+        clearTimeout(actionErrorTimeoutRef.current);
+      }
+      actionErrorTimeoutRef.current = setTimeout(
+        () => setActionError(null),
+        4000,
+      );
       return false;
     }
   };
