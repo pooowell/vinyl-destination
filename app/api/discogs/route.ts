@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { checkVinylAvailability } from "@/lib/discogs";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Error checking vinyl availability:", error);
+    logger.error("Error checking vinyl availability", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to check vinyl availability" },
       { status: 500 }

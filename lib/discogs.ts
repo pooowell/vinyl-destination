@@ -3,6 +3,7 @@ import {
   setCachedVinylStatus,
   getBulkCachedVinylStatus,
 } from "./db";
+import { logger } from "./logger";
 
 const DISCOGS_API_URL = "https://api.discogs.com";
 
@@ -57,9 +58,9 @@ export async function fetchWithRetry(
         }
       }
 
-      console.warn(
-        `Discogs API returned ${response.status}, retrying in ${delayMs}ms ` +
-          `(attempt ${attempt + 1}/${maxRetries})`,
+      logger.warn(
+        `Discogs API returned ${response.status}, retrying in ${delayMs}ms`,
+        { attempt: attempt + 1, maxRetries, delayMs },
       );
 
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -167,7 +168,7 @@ export async function checkVinylAvailability(
 
     return { available, discogsUrl };
   } catch (error) {
-    console.error("Error checking vinyl availability:", error);
+    logger.error("Error checking vinyl availability", { error: error instanceof Error ? error.message : String(error) });
     return { available: false, discogsUrl: null };
   }
 }
@@ -239,7 +240,7 @@ export async function getMostCollectedVinyl(
     const response = await discogsFetch<DiscogsSearchResponse>(endpoint);
     return response.results;
   } catch (error) {
-    console.error("Error fetching most collected vinyl:", error);
+    logger.error("Error fetching most collected vinyl", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }

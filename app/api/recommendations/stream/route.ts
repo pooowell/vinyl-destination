@@ -11,6 +11,7 @@ import {
 } from "@/lib/spotify";
 import { getActiveUserAlbumIds, getUserAlbumsByStatus, cleanupExpiredSkips } from "@/lib/db";
 import { checkVinylAvailability, getMostCollectedVinyl } from "@/lib/discogs";
+import { logger } from "@/lib/logger";
 
 export type RecommendationSource =
   | "top_tracks"
@@ -274,7 +275,7 @@ export async function GET() {
                 }
               }
             } catch (e) {
-              console.error("Error getting collection-based recommendations:", e);
+              logger.error("Error getting collection-based recommendations", { error: e instanceof Error ? e.message : String(e) });
             }
           }
 
@@ -307,13 +308,13 @@ export async function GET() {
                 }
               }
             } catch (e) {
-              console.error("Error getting classics:", e);
+              logger.error("Error getting classics", { error: e instanceof Error ? e.message : String(e) });
             }
           }
 
           sendDone();
         } catch (error) {
-          console.error("Stream error:", error);
+          logger.error("Stream error", { error: error instanceof Error ? error.message : String(error) });
           if (!aborted) {
             safeEnqueue(
               encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`)
@@ -339,7 +340,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("Error in recommendations stream:", error);
+    logger.error("Error in recommendations stream", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to start recommendations stream" },
       { status: 500 }
