@@ -3,6 +3,7 @@ import {
   setCachedVinylStatus,
   getBulkCachedVinylStatus,
 } from "./db";
+import { env } from "./env";
 
 const DISCOGS_API_URL = "https://api.discogs.com";
 
@@ -108,7 +109,7 @@ async function discogsFetch<T>(endpoint: string): Promise<T> {
 
   const response = await fetchWithRetry(`${DISCOGS_API_URL}${endpoint}`, {
     headers: {
-      Authorization: `Discogs token=${process.env.DISCOGS_TOKEN}`,
+      Authorization: `Discogs token=${env.DISCOGS_TOKEN}`,
       "User-Agent": "SpotifyVinylSearch/1.0",
     },
   });

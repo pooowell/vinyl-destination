@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
+import { env } from "./env";
 
 let db: Database.Database | null = null;
 
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS vinyl_cache (
 
 export function getDatabase(): Database.Database {
   if (!db) {
-    const dbPath = process.env.DATABASE_PATH || "./data/vinyl.db";
+    const dbPath = env.DATABASE_PATH;
 
     // Ensure parent directory exists (skip for in-memory DBs)
     if (dbPath !== ":memory:") {

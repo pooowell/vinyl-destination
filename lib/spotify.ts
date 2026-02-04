@@ -1,3 +1,5 @@
+import { env } from "./env";
+
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_API_URL = "https://api.spotify.com/v1";
@@ -19,9 +21,9 @@ export const retryDefaults = {
 
 export function getSpotifyAuthUrl(state: string): string {
   const params = new URLSearchParams({
-    client_id: process.env.SPOTIFY_CLIENT_ID!,
+    client_id: env.SPOTIFY_CLIENT_ID,
     response_type: "code",
-    redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
+    redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
     scope: SCOPES,
     state,
   });
@@ -43,13 +45,13 @@ export async function exchangeCodeForTokens(code: string): Promise<TokenResponse
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${Buffer.from(
-        `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+        `${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`
       ).toString("base64")}`,
     },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: `${process.env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
+      redirect_uri: `${env.NEXT_PUBLIC_BASE_URL}/api/auth/callback`,
     }),
     signal: AbortSignal.timeout(retryDefaults.timeoutMs),
   });
@@ -68,7 +70,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
       Authorization: `Basic ${Buffer.from(
-        `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+        `${env.SPOTIFY_CLIENT_ID}:${env.SPOTIFY_CLIENT_SECRET}`
       ).toString("base64")}`,
     },
     body: new URLSearchParams({
