@@ -89,8 +89,10 @@ describe("CollectionPage – remove handlers", () => {
 
     // The DELETE fetch was called with the right albumId
     const deleteCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
-      ([url, opts]: [string, RequestInit | undefined]) =>
-        url.includes("albumId=o1") && opts?.method === "DELETE"
+      (call) => {
+        const [url, opts] = call as [string, RequestInit | undefined];
+        return url.includes("albumId=o1") && opts?.method === "DELETE";
+      }
     );
     expect(deleteCalls).toHaveLength(1);
   });
