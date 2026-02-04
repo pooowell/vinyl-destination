@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getUser, updateUserTokens } from "./db";
 import { refreshAccessToken } from "./spotify";
 import crypto from "crypto";
+import { env } from "./env";
 
 const SESSION_COOKIE = "spotify_session";
 const STATE_COOKIE = "oauth_state";
@@ -10,7 +11,7 @@ const IS_PRODUCTION = process.env.NODE_ENV === "production";
 // Simple encryption for session data
 function encrypt(text: string): string {
   const algorithm = "aes-256-cbc";
-  const key = crypto.scryptSync(process.env.NEXTAUTH_SECRET!, "salt", 32);
+  const key = crypto.scryptSync(env.NEXTAUTH_SECRET, "salt", 32);
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv(algorithm, key, iv);
   let encrypted = cipher.update(text, "utf8", "hex");
@@ -20,7 +21,7 @@ function encrypt(text: string): string {
 
 function decrypt(encryptedText: string): string {
   const algorithm = "aes-256-cbc";
-  const key = crypto.scryptSync(process.env.NEXTAUTH_SECRET!, "salt", 32);
+  const key = crypto.scryptSync(env.NEXTAUTH_SECRET, "salt", 32);
   const [ivHex, encrypted] = encryptedText.split(":");
   const iv = Buffer.from(ivHex, "hex");
   const decipher = crypto.createDecipheriv(algorithm, key, iv);
