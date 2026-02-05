@@ -7,6 +7,7 @@ import {
   removeAlbumStatus,
 } from "@/lib/db";
 import { collectionPostSchema, collectionDeleteSchema } from "@/lib/schemas";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest) {
       wishlist: wishlistAlbums.map(formatAlbum),
     });
   } catch (error) {
-    console.error("Error fetching collection:", error);
+    logger.error("Error fetching collection", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to fetch collection" },
       { status: 500 }
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Error updating collection:", error);
+    logger.error("Error updating collection", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to update collection" },
       { status: 500 }
@@ -124,7 +125,7 @@ export async function DELETE(request: NextRequest) {
         { status: 400 }
       );
     }
-    console.error("Error removing from collection:", error);
+    logger.error("Error removing from collection", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to remove from collection" },
       { status: 500 }

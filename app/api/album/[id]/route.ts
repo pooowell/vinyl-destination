@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/auth";
 import { searchVinylRelease } from "@/lib/discogs";
 import { getAlbumDetails, getTopTracks } from "@/lib/spotify";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -67,7 +68,7 @@ export async function GET(
         };
       }
     } catch (e) {
-      console.error("Error fetching Discogs info:", e);
+      logger.error("Error fetching Discogs info", { error: e instanceof Error ? e.message : String(e) });
     }
 
     // Format tracks with preview URLs
@@ -101,7 +102,7 @@ export async function GET(
       discogs: discogsInfo,
     });
   } catch (error) {
-    console.error("Error fetching album details:", error);
+    logger.error("Error fetching album details", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to fetch album details" },
       { status: 500 }

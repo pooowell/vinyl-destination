@@ -6,6 +6,7 @@ import {
   clearStateCookie,
   setSessionCookie,
 } from "@/lib/auth";
+import { logger } from "@/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -19,18 +20,18 @@ export async function GET(request: NextRequest) {
 
   // Handle errors from Spotify
   if (error) {
-    console.error("Spotify auth error:", error);
+    logger.error("Spotify auth error", { error: String(error) });
     return NextResponse.redirect(`${baseUrl}?error=${error}`);
   }
 
   // Verify state
   const savedState = await getStateCookie();
-  console.log("State check - received:", state, "saved:", savedState);
+  logger.debug("State check", { received: state, saved: savedState });
   if (!state || state !== savedState) {
-    console.error("State mismatch - received:", state, "saved:", savedState);
+    logger.error("State mismatch", { received: state, saved: savedState });
     // In development, skip state check if cookie is missing (common issue with localhost)
     if (process.env.NODE_ENV === "development" && !savedState && state) {
-      console.warn("Skipping state validation in development mode");
+      logger.warn("Skipping state validation in development mode");
     } else {
       return NextResponse.redirect(`${baseUrl}?error=state_mismatch`);
     }
@@ -68,7 +69,7 @@ export async function GET(request: NextRequest) {
     // Redirect to recommendations page
     return NextResponse.redirect(`${baseUrl}/recommendations`);
   } catch (err) {
-    console.error("Auth callback error:", err);
+    logger.error("Auth callback error", { error: err instanceof Error ? err.message : String(err) });
     return NextResponse.redirect(`${baseUrl}?error=auth_failed`);
   }
 }

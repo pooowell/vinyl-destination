@@ -11,6 +11,7 @@ import {
 } from "@/lib/spotify";
 import { getAllUserAlbumIds } from "@/lib/db";
 import { batchCheckVinylAvailability } from "@/lib/discogs";
+import { logger } from "@/lib/logger";
 
 export interface RecommendationAlbum {
   id: string;
@@ -75,7 +76,7 @@ export async function GET() {
 
     return NextResponse.json({ recommendations });
   } catch (error) {
-    console.error("Error fetching recommendations:", error);
+    logger.error("Error fetching recommendations", { error: error instanceof Error ? error.message : String(error) });
     return NextResponse.json(
       { error: "Failed to fetch recommendations" },
       { status: 500 }
